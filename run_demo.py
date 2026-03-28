@@ -15,7 +15,7 @@ import logging
 import sys
 
 from models import ScoutItem
-from nodes import run_stage2_batch
+from p06_nodes import run_stage2_batch
 from utils import clear_hash_set
 
 # ── Logging setup ──
