@@ -1,30 +1,10 @@
 from ddgs import DDGS
-import sqlite3
 import time
+from database import Database
 
-def init_db():
-    conn = sqlite3.connect('events.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            link TEXT,
-            keyword_used TEXT,
-            source_engine TEXT,
-            status TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    return conn
-
-def run_search_agent():
+def run_search_agent(keywords, categories):
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
-    conn = init_db()
-    cursor = conn.cursor()
-    keywords = ["Artificial intelligence", "web development"]
-    categories = ["internships", "Current news", "workshops", "events", "hackathons"]
+    db = Database()
 
     print("--------- Keyword Expansion -------------")
     search_queries = []
@@ -51,27 +31,26 @@ def run_search_agent():
                     print(f"{i}. {title}")
                     print(f"   Link: {link}")
                     
-                    cursor.execute("SELECT 1 FROM events WHERE link = ?", (link,))
-                    if not cursor.fetchone():
-                        cursor.execute('''
-                            INSERT INTO events (title, link, keyword_used, source_engine, status)
-                            VALUES (?, ?, ?, ?, ?)
-                        ''', (title, link, query, 'DuckDuckGo', 'not processed'))
-                        conn.commit()
+                    if not db.link_exists(link):
+                        db.insert_event(title, link, query, 'DuckDuckGo', 'not processed')
         except Exception as e:
             print(f"   Error searching for '{query}': {e}")
         
         # Small delay to avoid hitting rate limits too quickly
         time.sleep(1)
-            
-    conn.close()
+             
+    db.close()
 
 def main():
     print("Search agent started. Running search...")
     print("Press Ctrl+C to exit.")
     
+    keywords = ["Artificial intelligence", "web development"]
+    categories = ["internships", "Current news", "workshops", "events", "hackathons"]
+    
     # Run the search agent immediately
-    run_search_agent()
-
+    run_search_agent(keywords, categories)
+ 
 if __name__ == "__main__":
     main()
+ 
