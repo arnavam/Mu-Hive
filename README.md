@@ -23,4 +23,4 @@ pip install -r requirements.txt
 
 6. Run the searchengine agent
 
-python searchengineagent.pyss
+python searchengineagent.py
