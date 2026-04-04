@@ -31,7 +31,7 @@ def run_search_agent(keywords, categories):
                     print(f"{i}. {title}")
                     print(f"   Link: {link}")
                     
-                    if not db.link_exists(link):
+                    if not db.link_exists(link, query):
                         db.insert_event(title, link, query, 'DuckDuckGo', 'not processed')
         except Exception as e:
             print(f"   Error searching for '{query}': {e}")

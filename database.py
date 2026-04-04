@@ -12,11 +12,13 @@ class Database:
         self.events = self.db['events']
         
         # Create an index on link to ensure uniqueness and fast lookup
-        self.events.create_index("link", unique=True)
+        self.events.create_index([("link", 1), ("keyword_used", 1)],unique=True)
         
-    def link_exists(self, link):
-        """Check if an event with the given link already exists in the database."""
-        return self.events.find_one({"link": link}) is not None
+    def link_exists(self, link, keyword):
+        return self.events.find_one({
+            "link": link,
+            "keyword_used": keyword
+        }) is not None
         
     def insert_event(self, title, link, keyword_used, source_engine, status):
         """Insert a new event into the database."""
