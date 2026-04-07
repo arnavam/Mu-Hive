@@ -2,7 +2,7 @@ from ddgs import DDGS
 import time
 from database import Database
 
-def run_search_agent(keywords, categories):
+def run_search_agent(keywords, categories, max_result=5):
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
     db = Database()
 
@@ -15,13 +15,13 @@ def run_search_agent(keywords, categories):
             print(f"- {query}")
 
     print("\n--- Searching DuckDuckGo ---")
-    
+     
     ddgs = DDGS()
     for query in search_queries:
         print(f"\nResults for '{query}':")
         try:
-            # Get top 5 results for each expanded query
-            results = list(ddgs.text(query, max_results=5))
+            # Get top results for each expanded query
+            results = list(ddgs.text(query, max_results=max_result))
             if not results:
                 print("   No results found.")
             else:

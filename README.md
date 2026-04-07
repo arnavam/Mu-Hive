@@ -1,4 +1,4 @@
-# Mu-Hive SearchEngineAgent
+# Mu-Hive Search Engine Agent
 
 This project collects event links from search engine and stores them in MongoDB.
 
@@ -21,6 +21,6 @@ pip install -r requirements.txt
 
 5. Start MongoDB server
 
-6. Run the searchengine agent
+6. Run the search engine agent
 
-python searchengineagent.pyss
+python search_engine.py
