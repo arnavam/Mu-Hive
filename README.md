@@ -44,7 +44,6 @@ Mu-Hive is an autonomous, multi-agent AI pipeline that discovers, evaluates, and
 ```
 Mu-Hive/
 ├── main.py                    # Entry point — runs the full pipeline
-├── .env                       # Your Groq API key (not committed)
 ├── .env.example               # Template for .env
 ├── requirements.txt           # Python dependencies
 ├── mu_hive.db                 # SQLite database (auto-created)
