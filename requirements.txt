@@ -1,0 +1,7 @@
+pydantic>=2.9.0
+pydantic-ai>=0.0.12
+groq>=0.4.2
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+feedparser>=6.0.10
