@@ -1,35 +1,24 @@
 import os
 import json
 import asyncio
-import asyncpg
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 load_dotenv(override=True)
 
 app = Flask(__name__)
 
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ig_project")
 
-db_pool = None
-
-async def get_db_pool():
-    global db_pool
-    if db_pool is None:
-        db_pool = await asyncpg.create_pool(DATABASE_URL)
-        async with db_pool.acquire() as conn:
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS scraped_data (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT NOT NULL,
-                    mode TEXT NOT NULL,
-                    data JSONB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-    return db_pool
+# pymongo client is thread-safe; create once at startup
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[MONGO_DB_NAME]
+collection = db["scraped_data"]
 
 def call_firecrawl(firecrawl_app, mode, url, options):
     if mode == 'crawl':
@@ -53,8 +42,8 @@ async def scrape():
             return jsonify({"error": "Firecrawl API key not found in backend .env"}), 400
 
         firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
-        
-        # Run blocking Firecrawl API calls in thread so it does not block the event loop
+
+        # Run blocking Firecrawl API call in a thread so it does not block the event loop
         result = await asyncio.to_thread(call_firecrawl, firecrawl_app, mode, url, options)
 
         # Handle object serialization if the result is a custom Document object from Firecrawl
@@ -67,13 +56,14 @@ async def scrape():
         else:
             serializable_result = result
 
-        # Wait for the DB pool and insert data
-        pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO scraped_data (url, mode, data) VALUES ($1, $2, $3)",
-                url, mode, json.dumps(serializable_result)
-            )
+        # Insert into MongoDB
+        doc = {
+            "url": url,
+            "mode": mode,
+            "data": serializable_result,
+            "created_at": datetime.now(timezone.utc)
+        }
+        collection.insert_one(doc)
 
         return jsonify(serializable_result)
 

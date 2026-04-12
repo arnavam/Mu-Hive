@@ -37,3 +37,18 @@ share/python-wheels/
 
 # MacOS
 .DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Scraped output files
+backend/out.txt
+backend/out2.txt
