@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ddgs import DDGS
 import requests
 import time
@@ -5,7 +7,7 @@ import os
 from dotenv import load_dotenv
 from database import Database
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 def run_search_agent(keywords, categories, max_result=5):
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")

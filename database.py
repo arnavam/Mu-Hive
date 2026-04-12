@@ -38,6 +38,40 @@ class Database:
             print(f"Error inserting into db: {e}")
             return False
 
+    def find_pending_scrape(self, limit=50):
+        """Events inserted by the search agent with status 'not processed'."""
+        return list(
+            self.events.find({"status": "not processed"}).limit(limit)
+        )
+
+    def update_event_scrape(
+        self,
+        doc_id,
+        status,
+        scraped_page_title=None,
+        scraped_meta_description=None,
+        scraped_text_summary=None,
+        scrape_error=None,
+    ):
+        """Attach scrape results to the event document identified by _id."""
+        fields = {
+            "status": status,
+            "scraped_at": datetime.datetime.utcnow(),
+        }
+        if scraped_page_title is not None:
+            fields["scraped_page_title"] = scraped_page_title
+        if scraped_meta_description is not None:
+            fields["scraped_meta_description"] = scraped_meta_description
+        if scraped_text_summary is not None:
+            fields["scraped_text_summary"] = scraped_text_summary
+        if scrape_error is not None:
+            fields["scrape_error"] = scrape_error
+        else:
+            fields["scrape_error"] = None
+
+        result = self.events.update_one({"_id": doc_id}, {"$set": fields})
+        return result.modified_count > 0
+
     def close(self):
         """Close the MongoDB connection."""
         self.client.close()
