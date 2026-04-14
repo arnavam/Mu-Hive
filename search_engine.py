@@ -3,7 +3,7 @@ from pathlib import Path
 from ddgs import DDGS
 import requests
 import time
-import os
+import os 
 from dotenv import load_dotenv
 from database import Database
 

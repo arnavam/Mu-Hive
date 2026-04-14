@@ -1,149 +1,143 @@
 import re
 import time
-
-import requests
-from bs4 import BeautifulSoup
+import scrapy
+from scrapy.crawler import CrawlerProcess
+import trafilatura
 
 from database import Database
 
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+import logging
+import warnings
 
-SUMMARY_MAX_CHARS = 4000
-REQUEST_TIMEOUT = 20
+# Suppress Scrapy deprecation and other internal warnings
+warnings.filterwarnings("ignore")
+logging.getLogger('scrapy').propagate = False
 
+SUMMARY_MAX_SENTENCES = 5
 
-def _meta_content(soup, *keys):
-    for key in keys:
-        tag = soup.find("meta", attrs={"property": key}) or soup.find(
-            "meta", attrs={"name": key}
-        )
-        if tag and tag.get("content"):
-            return tag["content"].strip()
-    return None
+class ScraperSpider(scrapy.Spider):
+    name = 'scraper_spider'
 
+    def __init__(self, limit=50, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.db = Database()
+        self.limit = limit
+        self.pending = self.db.find_pending_scrape(limit=self.limit)
+        
+    def start_requests(self):
+        if not self.pending:
+            print("No pending events (status 'not processed').")
+            return
+            
+        print(f"Found {len(self.pending)} event(s) to scrape.")
+        
+        for doc in self.pending:
+            doc_id = doc.get("_id")
+            link = doc.get("link")
+            
+            if doc_id is None:
+                continue
 
-def _visible_text_summary(soup):
-    for tag in soup(["script", "style", "noscript", "svg"]):
-        tag.decompose()
-    for sel in ("nav", "footer", "header", "[role='navigation']"):
-        for t in soup.select(sel):
-            t.decompose()
-    main = soup.find("main") or soup.find("article") or soup.body or soup
-    text = main.get_text(separator=" ", strip=True) if main else ""
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > SUMMARY_MAX_CHARS:
-        text = text[: SUMMARY_MAX_CHARS - 3] + "..."
-    return text or None
-
-
-def scrape_url(url):
-    """
-    Fetch URL and return dict with page_title, meta_description, text_summary.
-    Raises on HTTP/network errors.
-    """
-    resp = requests.get(
-        url,
-        headers=DEFAULT_HEADERS,
-        timeout=REQUEST_TIMEOUT,
-        allow_redirects=True,
-    )
-    resp.raise_for_status()
-    ctype = (resp.headers.get("Content-Type") or "").lower()
-    if "text/html" not in ctype and "application/xhtml" not in ctype:
-        raise ValueError(f"Not HTML: {ctype!r}")
-
-    soup = BeautifulSoup(resp.content, "lxml")
-    page_title = _meta_content(soup, "og:title") or (
-        soup.title.get_text(strip=True) if soup.title else None
-    )
-    meta_description = _meta_content(
-        soup, "og:description", "description", "twitter:description"
-    )
-    text_summary = _visible_text_summary(soup)
-    return {
-        "scraped_page_title": page_title,
-        "scraped_meta_description": meta_description,
-        "scraped_text_summary": text_summary,
-    }
-
-
-def _is_scrapable_link(link):
-    if not link or not isinstance(link, str):
-        return False
-    u = link.strip().lower()
-    return u.startswith("http://") or u.startswith("https://")
-
-
-def run_scraper_agent(limit=50, delay_seconds=1.0):
-    """
-    Process events with status 'not processed': scrape each link and persist
-    structured fields on the same MongoDB document.
-    """
-    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scraper agent...")
-    db = Database()
-    pending = db.find_pending_scrape(limit=limit)
-    if not pending:
-        print("No pending events (status 'not processed').")
-        db.close()
-        return
-
-    print(f"Found {len(pending)} event(s) to scrape.")
-    for doc in pending:
-        doc_id = doc.get("_id")
-        link = doc.get("link")
-        if doc_id is None:
-            print(f"  Skip (missing _id): {link!r}")
-            continue
-
-        if not _is_scrapable_link(link):
-            print(f"  Skip (invalid URL): {link!r}")
-            db.update_event_scrape(
-                doc_id,
-                status="scrape_failed",
-                scrape_error="Invalid or missing HTTP(S) URL",
+            if not link or not isinstance(link, str) or not (link.strip().lower().startswith("http://") or link.strip().lower().startswith("https://")):
+                print(f"  [Skip] Invalid URL: {link!r}")
+                self.db.update_event_scrape(
+                    doc_id,
+                    status="scrape_failed",
+                    scrape_error="Invalid or missing HTTP(S) URL",
+                )
+                continue
+            
+            print(f"Scraping: {link}")
+            yield scrapy.Request(
+                url=link, 
+                callback=self.parse, 
+                errback=self.errback, 
+                cb_kwargs={'doc_id': doc_id}
             )
-            continue
 
-        print(f"  Scraping: {link}")
+    def parse(self, response, doc_id):
         try:
-            data = scrape_url(link)
-            ok = db.update_event_scrape(
+            # Extract basic metadata via Scrapy CSS/XPath selectors
+            scraped_page_title = response.css('title::text').get()
+            if not scraped_page_title:
+                scraped_page_title = response.xpath('//meta[@property="og:title"]/@content').get()
+                
+            scraped_meta_description = response.xpath('//meta[@name="description"]/@content').get()
+            if not scraped_meta_description:
+                scraped_meta_description = response.xpath('//meta[@property="og:description"]/@content').get()
+
+            # Extract main text block using Trafilatura
+            html = response.text
+            text = trafilatura.extract(html, include_links=False, include_images=False, include_tables=False)
+            
+            summary = ""
+            if text:
+                # Basic summarization: take the first 4-5 sentences
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+                summary_sentences = [s.strip() for s in sentences if s.strip()]
+                # Keep up to SUMMARY_MAX_SENTENCES
+                summary_sentences = summary_sentences[:SUMMARY_MAX_SENTENCES]
+                summary = " ".join(summary_sentences)
+            
+            # Persist to database
+            ok = self.db.update_event_scrape(
                 doc_id,
                 status="scraped",
-                scraped_page_title=data["scraped_page_title"],
-                scraped_meta_description=data["scraped_meta_description"],
-                scraped_text_summary=data["scraped_text_summary"],
+                scraped_page_title=scraped_page_title,
+                scraped_meta_description=scraped_meta_description,
+                scraped_text_summary=summary or None,
             )
             if ok:
-                print("    -> stored: scraped")
+                print(f"  [Success] Scraped cleanly: {response.url}")
             else:
-                print("    [!] MongoDB update matched no document")
+                print(f"  [Warning] MongoDB update matched no document for {response.url}")
+                
         except Exception as e:
-            print(f"    [!] Failed: {e}")
-            db.update_event_scrape(
+            print(f"  [Error] Failed to parse {response.url}: {e}")
+            self.db.update_event_scrape(
                 doc_id,
                 status="scrape_failed",
                 scrape_error=str(e)[:500],
             )
+            
+    def errback(self, failure):
+        request = failure.request
+        doc_id = request.cb_kwargs.get('doc_id')
+        print(f"  [Error] Failed to fetch {request.url}: {failure.value.__class__.__name__}")
+        if doc_id:
+            self.db.update_event_scrape(
+                doc_id,
+                status="scrape_failed",
+                scrape_error=str(failure.value)[:500],
+            )
+            
+    def closed(self, reason):
+        self.db.close()
 
-        if delay_seconds:
-            time.sleep(delay_seconds)
-
-    db.close()
+def run_scraper_agent(limit=50, delay_seconds=1.0):
+    """
+    Process events with status 'not processed': scrape each link and persist
+    structured fields using Scrapy and Trafilatura.
+    """
+    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scraper agent...")
+    
+    # Configure Scrapy process
+    process = CrawlerProcess(settings={
+        "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "LOG_LEVEL": "ERROR", # Silence all the verbose info and stats
+        "DOWNLOAD_DELAY": delay_seconds,
+        "DOWNLOAD_TIMEOUT": 20,
+        "ROBOTSTXT_OBEY": False,
+        "CONCURRENT_REQUESTS": 4, # Adjust based on preference
+    })
+    
+    process.crawl(ScraperSpider, limit=limit)
+    process.start() # This blocks until scraping is finished
+    
     print("Scraper agent finished.")
-
 
 def main():
     run_scraper_agent()
-
 
 if __name__ == "__main__":
     main()

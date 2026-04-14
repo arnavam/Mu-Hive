@@ -8,5 +8,6 @@ primp==1.2.0
 pymongo==4.16.0
 schedule==1.2.2
 requests==2.32.3
-beautifulsoup4==4.12.3
+scrapy
+trafilatura
 python-dotenv
