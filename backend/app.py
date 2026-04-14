@@ -5,20 +5,13 @@ from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template
 from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
-from pymongo import MongoClient
+from database import db
 
 load_dotenv(override=True)
 
 app = Flask(__name__)
 
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ig_project")
-
-# pymongo client is thread-safe; create once at startup
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client[MONGO_DB_NAME]
-collection = db["scraped_data"]
 
 def call_firecrawl(firecrawl_app, mode, url, options):
     if mode == 'crawl':
@@ -56,14 +49,8 @@ async def scrape():
         else:
             serializable_result = result
 
-        # Insert into MongoDB
-        doc = {
-            "url": url,
-            "mode": mode,
-            "data": serializable_result,
-            "created_at": datetime.now(timezone.utc)
-        }
-        collection.insert_one(doc)
+        # Insert into MongoDB using the new database module
+        db.save_scrape_result(url, mode, serializable_result)
 
         return jsonify(serializable_result)
 
