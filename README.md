@@ -1,5 +1,6 @@
-# Mu-Hive  (Define whats Mu-hive here!)
+# Mu-Hive  
 
+(Define whats Mu-hive here!)
 ---
 
 ## 🏗️ Project Blueprint
@@ -49,7 +50,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 🚀 Next Steps
+### Next Steps
 *   Define core schemas in `src/db/`.
 *   Implement basic LLM wrapper in `src/llm/`.
 *   Create the first agents in `src/agents/`.
