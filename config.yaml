@@ -12,8 +12,7 @@ stage2:
     review: 3.5           # rough_score < this → review
     pass: 3.5             # rough_score >= this → pass
 
-  group_slice_min_score: 2.5
-  trust_threshold_for_ready: 60   # final trust score threshold for ready_for_stage3
+  trust_threshold_for_ready: 60
   default_source_tier: 0.5
 
   # ── Retry / Circuit Breaker ──
@@ -40,6 +39,10 @@ stage2:
     ieee.org: 1.0
     reddit.com: 0.6
     mlh.io: 1.0
+    defcon.org: 1.0
+    blog.google: 0.9
+    nextjs.org: 0.9
+    vercel.com: 0.9
 
   # ── Interest Groups (3 for now — add more via config only) ──
   groups:
@@ -83,26 +86,19 @@ stage2:
 
   # ── Search (Tavily primary, DuckDuckGo fallback) ──
   search:
-    primary: tavily
-    fallback: duckduckgo
+    primary: duckduckgo
+    fallback: tavily
     trigger_min_rough_score: 3.0
     max_results: 3
 
-  # ── Trust Score Weights ──
   trust_weights:
     relevance: 0.20
     source_tier: 0.15
     detail: 0.15
     consistency: 0.15
     penalty_missing: 0.10
-    grounding: 0.10
-    verification: 0.15
+    grounding: 0.25      # combined grounding + verification weight
 
-  # ── LLM Adapters ──
-  adapters:
-    primary_fast: groq
-    primary_quality: gemini
-    fallback: openrouter
 
   # ── Model Names ──
   models:

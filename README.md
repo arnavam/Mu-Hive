@@ -1,27 +1,47 @@
-# MuLearn AI Pipeline — Stage 2 (Processing Node)
+# 🐝 MuHive: AI Content Pipeline
 
-This is the production-ready **Stage 2 Data Processing Pipeline** for the MuLearn AI Interest Group.
-
----
-
-## 📂 Project Structure (Task-Based Flow)
-
-The codebase is organized into task-specific modules numbered in their execution order:
-
-1.  **[p01_configuration.py](file:///home/johan-b-joy/MuHive/p01_configuration.py)**: Loads/caches settings from `config.yaml`.
-2.  **[p02_text_processing.py](file:///home/johan-b-joy/MuHive/p02_text_processing.py)**: Cleans URLs and generates unique fingerprints.
-3.  **[p03_pre_filtering.py](file:///home/johan-b-joy/MuHive/p03_pre_filtering.py)**: Performs Stage 2a deduplication and blocklisting.
-4.  **[p04_llm_orchestrator.py](file:///home/johan-b-joy/MuHive/p04_llm_orchestrator.py)**: Initializes AI models (Groq, Gemini, etc.).
-5.  **[p05_prompt_library.py](file:///home/johan-b-joy/MuHive/p05_prompt_library.py)**: Central store for all AI instructions.
-6.  **[p06_nodes.py](file:///home/johan-b-joy/MuHive/p06_nodes.py)**: The main orchestrator (Stage 2 Logic).
-7.  **[p07_web_searching.py](file:///home/johan-b-joy/MuHive/p07_web_searching.py)**: Stage 2b web search verification.
-8.  **[p08_trust_scoring.py](file:///home/johan-b-joy/MuHive/p08_trust_scoring.py)**: Final 0-100 Trust Score calculation.
-9.  **[p09_circuit_breaker.py](file:///home/johan-b-joy/MuHive/p09_circuit_breaker.py)**: Failure protection for AI providers.
+A high-performance, automated pipeline designed to filter, verify, and tailor content for the MuLearn community. MuHive transforms raw social media/news data into verified, high-trust intelligence.
 
 ---
 
-## 🚀 How to Run
+## 🏗️ Architecture
 
-1. **Install Dependencies**: `pip install -r requirements.txt`
-2. **Setup Keys**: Add keys to `keys.env`.
-3. **Demo**: `python run_demo.py`
+The project has been consolidated into a sleek, 4-module structure for maximum clarity and debuggability:
+
+- **[`p1_data_schemas.py`](file:///home/johan-b-joy/MuHive/p1_data_schemas.py)**: **The Foundation.** Definitive schemas that define how data looks.
+- **[`p2_logic_utils.py`](file:///home/johan-b-joy/MuHive/p2_logic_utils.py)**: **The Infrastructure.** Background helpers (Config, Hashing, Circuit Breakers).
+- **[`p3_orchestrator.py`](file:///home/johan-b-joy/MuHive/p3_orchestrator.py)**: **The Intelligence.** The main brain (Prompts, LLMs, Logic, Node).
+- **[`run_demo.py`](file:///home/johan-b-joy/MuHive/run_demo.py)**: **The Execution.** The entry point to run the system.
+
+---
+
+## 🚀 Quick Start
+
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure API Keys**:
+   Add your keys to `keys.env`:
+   - `GROQ_API_KEY` (Fast classification)
+   - `GEMINI_API_KEY` (Quality analysis)
+   - `TAVILY_API_KEY` (Web verification)
+
+3. **Run the Demo**:
+   ```bash
+   python run_demo.py
+   ```
+
+---
+
+## 🛠️ Key Features
+
+- **Multi-LLM Orchestration**: Automatically switches between Groq (Llama-3) and Gemini 1.5 based on speed/quality requirements.
+- **Smart Verification**: Uses Tavily and DuckDuckGo to reality-check AI claims in real-time.
+- **Circuit Breaking**: Automatically skips failing providers to save credits and prevent pipeline hangs.
+- **Weighted Trust Scoring**: Calculates a 0-100 reliability score based on source, grounding, and consistency.
+
+---
+
+MuHive is built for students who want to build high-scale, reliable agentic systems. **Clean, simple, and powerful.**

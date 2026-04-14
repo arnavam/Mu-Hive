@@ -1,15 +1,17 @@
 """
-MuLearn Stage 2 — Pydantic Schemas
-ScoutItem → GroupSlice → Stage2Result
+MuHive Data Schemas
 
-All schemas are strict Pydantic v2 models with JSON-mode compatibility.
-Stage2Result is the final storage-ready output — Stage 3 writes it directly.
+ScoutItem (input) → Stage2Result (output).
+Internals: FastFilterResult, QualityResult (LLM structured outputs).
 """
 
 from __future__ import annotations
-
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
+
+# ==============================================================================
+# SECTION 1: EXTERNAL SCHEMAS (Main API)
+# ==============================================================================
 
 
 class ScoutItem(BaseModel):
@@ -19,7 +21,6 @@ class ScoutItem(BaseModel):
     url: str
     source: str
     deadline: Optional[str] = None
-    raw_html: Optional[str] = None
 
 
 class GroupSlice(BaseModel):
@@ -47,7 +48,9 @@ class Stage2Result(BaseModel):
     verifier_notes: Optional[str] = None
 
 
-# ── Intermediate schemas (used internally by Groq fast-filter) ──
+# ==============================================================================
+# SECTION 2: INTERNAL SCHEMAS (LLM Internals)
+# ==============================================================================
 
 class FastFilterGroupSlice(BaseModel):
     """Simplified group slice returned by the fast Groq classifier."""
@@ -64,7 +67,7 @@ class FastFilterResult(BaseModel):
     fail_reason: Optional[str] = None
 
 
-# ── Intermediate schema (used internally by Gemini quality pass) ──
+# ── Gemini / Quality Pass Schemas ──
 
 class QualityGroupSlice(BaseModel):
     """Gemini quality pass — per-group tailored output."""
