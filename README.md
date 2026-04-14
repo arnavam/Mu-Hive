@@ -1,6 +1,5 @@
 # Mu-Hive  
 
-(Define whats Mu-hive here!)
 ---
 
 ## 🏗️ Project Blueprint
