@@ -1,17 +1,13 @@
-import os
 from datetime import datetime, timezone
 from pymongo import MongoClient
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
+from src.config.settings import MONGO_URI, MONGO_DB_NAME
 
 class Database:
     def __init__(self):
-        self.uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-        self.db_name = os.getenv("MONGO_DB_NAME", "ig_project")
+        self.uri = MONGO_URI
+        self.db_name = MONGO_DB_NAME
         self._client = None
         self._db = None
-        self._collection = None
 
     @property
     def client(self):
@@ -28,12 +24,13 @@ class Database:
     def get_collection(self, name="scraped_data"):
         return self.db[name]
 
-    def save_scrape_result(self, url, mode, data):
+    def save_scrape_result(self, url, mode, data, summary=None):
         collection = self.get_collection()
         doc = {
             "url": url,
             "mode": mode,
             "data": data,
+            "summary": summary,
             "created_at": datetime.now(timezone.utc)
         }
         return collection.insert_one(doc)

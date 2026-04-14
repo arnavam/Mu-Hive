@@ -106,6 +106,17 @@
             </form>
         </main>
 
+        <!-- Summary Panel -->
+        <div id="summary-container" class="hidden glass-panel p-6 md:p-8 w-full flex-col gap-4 border-l-4 border-l-indigo-500 transition-all duration-500">
+            <h2 class="text-xl font-bold text-indigo-300 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                AI Summary
+            </h2>
+            <div id="summary-content" class="text-slate-300 leading-relaxed prose prose-invert max-w-none">
+                <!-- Summary will be injected here -->
+            </div>
+        </div>
+
         <!-- Results Panel -->
         <div id="results-container" class="hidden glass-panel p-6 md:p-8 w-full flex-col gap-4 transition-all duration-500 opacity-0 translate-y-4">
             <div class="flex justify-between items-center mb-2">
@@ -140,6 +151,8 @@
         const statusBadge = document.getElementById('status-badge');
         const copyBtn = document.getElementById('copy-btn');
         const processMdBtn = document.getElementById('process-md-btn');
+        const summaryContainer = document.getElementById('summary-container');
+        const summaryContent = document.getElementById('summary-content');
 
         let currentData = null;
         let showingMarkdown = false;
@@ -158,6 +171,7 @@
             
             // Hide previous results
             resultsContainer.classList.add('opacity-0', 'translate-y-4');
+            summaryContainer.classList.add('hidden');
             setTimeout(() => resultsContainer.classList.add('hidden'), 300);
 
             try {
@@ -177,7 +191,13 @@
                 processMdBtn.textContent = 'Render Markdown';
 
                 // Show results
-                resultsOutput.textContent = JSON.stringify(data, null, 2);
+                resultsOutput.textContent = JSON.stringify(data.data || data, null, 2);
+                
+                // Show AI Summary if present
+                if (data.summary) {
+                    summaryContent.innerHTML = marked.parse(data.summary);
+                    summaryContainer.classList.remove('hidden');
+                }
                 
                 if (response.ok) {
                     processMdBtn.classList.remove('hidden');
@@ -222,12 +242,14 @@
                 markdownOutput.classList.remove('hidden');
                 
                 let mdText = '';
-                if (currentData.markdown) {
-                    mdText = currentData.markdown;
-                } else if (currentData.data && Array.isArray(currentData.data)) {
-                    mdText = currentData.data.map(d => d.markdown).join('\\n\\n---\\n\\n');
-                } else if (currentData.data && currentData.data.markdown) {
-                    mdText = currentData.data.markdown;
+                const baseData = currentData.data || currentData;
+                
+                if (baseData.markdown) {
+                    mdText = baseData.markdown;
+                } else if (Array.isArray(baseData)) {
+                    mdText = baseData.map(d => d.markdown).join('\n\n---\n\n');
+                } else if (baseData.data && Array.isArray(baseData.data)) {
+                    mdText = baseData.data.map(d => d.markdown || d.content || d.text).join('\n\n---\n\n');
                 } else {
                     mdText = '_No markdown content found._';
                 }

@@ -1,23 +1,11 @@
 import os
-import json
 import asyncio
-from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template
-from firecrawl import FirecrawlApp
-from dotenv import load_dotenv
-from database import db
 
-load_dotenv(override=True)
+from src.agents.planner import planner
+from src.config.settings import FIRECRAWL_API_KEY
 
 app = Flask(__name__)
-
-FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
-
-def call_firecrawl(firecrawl_app, mode, url, options):
-    if mode == 'crawl':
-        return firecrawl_app.crawl(url, scrape_options=options)
-    else:
-        return firecrawl_app.scrape_url(url, params=options) if hasattr(firecrawl_app, 'scrape_url') else firecrawl_app.scrape(url, **options)
 
 @app.route('/')
 def index():
@@ -34,25 +22,14 @@ async def scrape():
         if not FIRECRAWL_API_KEY:
             return jsonify({"error": "Firecrawl API key not found in backend .env"}), 400
 
-        firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+        # Run the full pipeline using the PlannerAgent
+        # We don't need to wrap in to_thread here because process_url is already async
+        result = await planner.process_url(url, mode, options)
 
-        # Run blocking Firecrawl API call in a thread so it does not block the event loop
-        result = await asyncio.to_thread(call_firecrawl, firecrawl_app, mode, url, options)
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 500
 
-        # Handle object serialization if the result is a custom Document object from Firecrawl
-        if hasattr(result, 'model_dump'):
-            serializable_result = result.model_dump()
-        elif hasattr(result, 'dict'):
-            serializable_result = result.dict()
-        elif hasattr(result, '__dict__'):
-            serializable_result = result.__dict__
-        else:
-            serializable_result = result
-
-        # Insert into MongoDB using the new database module
-        db.save_scrape_result(url, mode, serializable_result)
-
-        return jsonify(serializable_result)
+        return jsonify(result)
 
     except Exception as e:
         print(f"Flask Error: {str(e)}")
