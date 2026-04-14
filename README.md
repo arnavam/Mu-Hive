@@ -1,7 +1,5 @@
 # Mu-Hive  
 
----
-
 ## 🏗️ Project Blueprint
 
 Here is the structure we are building:
