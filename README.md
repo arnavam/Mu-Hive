@@ -1,79 +1,77 @@
-# 🕷️ IG Project — Web Scraper
+# 🐝 Mu-Hive: Intelligence & Extraction Service
 
-A Flask-based web scraping tool powered by [Firecrawl](https://firecrawl.dev), with results stored in MongoDB Atlas.
+This directory contains the **Intelligence & Extraction Engine** for the Mu-Hive project. It is a multi-agent pipeline designed to autonomously scout, analyze, and store technical technical data from the web.
 
-## ✨ Features
+> [!NOTE]
+> This is a component of the larger Mu-Hive ecosystem, focusing on the data acquisition and AI-driven intelligence layer.
 
-- Scrape a single page or crawl an entire website
-- Render extracted Markdown content in the browser
-- Auto-saves all results to MongoDB Atlas
-- Clean, dark-mode glassmorphism UI
+---
 
-## 🚀 Getting Started
+## 🏗️ Project Structure
 
-### 1. Clone the repository
+The project follows a decoupled, agentic architecture to ensure each component can be scaled or modified independently.
 
+```text
+IG PROJECT/
+├── main.py                 # CLI Entry Point (Batch processing & Pipeline execution)
+├── app.py                  # Optional Web Dashboard (Flask-based visualization)
+├── requirements.txt        # Project dependencies
+├── src/
+│   ├── agents/             # Core AI Agents
+│   │   ├── scout.py        # ScoutAgent: Handles Firecrawl scraping & serialization
+│   │   ├── intelligence.py  # IntelligenceAgent: Handles LLM-based summarization (Groq)
+│   │   └── planner.py      # PlannerAgent: Orchestrates the Scrape -> Analyze -> Store flow
+│   ├── db/
+│   │   └── database.py     # MongoDB connection & data persistence logic
+│   ├── config/
+│   │   └── settings.py     # Environment variable management
+│   └── llm/
+│       └── agent_config.py # LLM hyperparameter configurations
+└── templates/              # Dashboard UI components (HTML/JS)
+```
+
+---
+
+## ⚙️ Core Pipeline Logic
+
+The system operates on an automated pipeline managed by the **Planner Agent**:
+
+1.  **Scouting**: The `ScoutAgent` uses the Firecrawl API to extract high-quality Markdown from target URLs (single page or full crawl).
+2.  **Intelligence**: The raw data is passed to the `IntelligenceAgent`, which uses **Groq (Llama-3.1-8B)** to generate concise technical summaries.
+3.  **Persistence**: The resulting intelligence (URL, raw data, and AI summary) is stored in **MongoDB Atlas** for use by other Mu-Hive modules.
+
+---
+
+## 🚀 Usage
+
+### Standalone Pipeline (Recommended for Group Integration)
+Use the CLI to process tasks in the background or batch.
 ```bash
-git clone https://github.com/AdhiNarayan206/Mu-Hive.git
-cd Mu-Hive
+# Single URL
+python main.py --urls https://example.com
+
+# Batch URLs
+python main.py --urls site1.com site2.com --mode crawl
+
+# Load from file
+python main.py --file targets.txt
 ```
 
-### 2. Create and activate a virtual environment
-
-```bash
-cd backend
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Set up environment variables
-
-Copy `.env.example` to `.env` and fill in your values:
-
-```bash
-cp .env.example .env
-```
-
-```env
-FIRECRAWL_API_KEY=your_firecrawl_api_key_here
-MONGO_URI=mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/?appName=Cluster0
-MONGO_DB_NAME=ig_project
-```
-
-| Variable | Description |
-|---|---|
-| `FIRECRAWL_API_KEY` | API key from [firecrawl.dev](https://firecrawl.dev) |
-| `MONGO_URI` | MongoDB Atlas connection string (SRV format) |
-| `MONGO_DB_NAME` | Name of the MongoDB database (default: `ig_project`) |
-
-### 5. Run the app
-
+### Dashboard (For Visualization)
 ```bash
 python app.py
 ```
+Visit `http://localhost:5000` to interact with the scraper and view AI summaries in real-time.
 
-Open [http://localhost:5000](http://localhost:5000) in your browser.
+---
 
-## 📦 Tech Stack
+## 🛠️ Configuration
+Ensure your `.env` contains the keys for the components:
+- `FIRECRAWL_API_KEY`: For web extraction.
+- `GROQ_API_KEY`: For AI analysis.
+- `MONGO_URI`: For data persistence.
 
-- **Backend**: Python, Flask
-- **Scraping**: Firecrawl API
-- **Database**: MongoDB Atlas (via `pymongo`)
-- **Frontend**: HTML, Tailwind CSS, Vanilla JS
+---
 
-## 🔒 Security
-
-- `.env` is listed in `.gitignore` and is **never committed**
-- Use `.env.example` as a template — it contains **no real credentials**
-- Keep your `FIRECRAWL_API_KEY` and `MONGO_URI` private at all times
+## 👥 Contributors
+This is a group project. Please ensure that logic changes are made within the `src/agents/` directory to maintain the decoupled architecture.
