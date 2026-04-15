@@ -4,7 +4,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DB_PATH", "mu_hive.db")
+# Resolve the absolute path to the data directory from the current file
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "data", "mu_hive.db"))
 
 def get_connection():
     """Returns a new SQLite connection to the pipeline database."""

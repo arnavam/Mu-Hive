@@ -1,0 +1,6 @@
+# System-wide non-secret configurations
+database:
+  name: "mu_hive.db"
+
+logging:
+  level: "INFO"

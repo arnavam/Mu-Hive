@@ -14,7 +14,7 @@ load_dotenv(dotenv_path=os.path.join(ROOT_DIR, ".env"))
 def test_db():
     """Verify the SQLite database exists and is readable."""
     try:
-        db_path = os.path.join(ROOT_DIR, "mu_hive.db")
+        db_path = os.path.join(ROOT_DIR, "data", "mu_hive.db")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
