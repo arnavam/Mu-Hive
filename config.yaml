@@ -1,0 +1,20 @@
+# Mu-Hive System Configuration
+
+# General Application Settings
+app:
+  name: "Mu-Hive"
+  version: "1.0.0"
+  debug: true
+
+# Agent Settings
+agents:
+  scout:
+    default_mode: "scrape"
+  intelligence:
+    max_chars_to_process: 15000
+    temperature: 0.5
+    max_tokens: 500
+
+# Pipeline Settings
+pipeline:
+  concurrency_limit: 5

@@ -2,7 +2,7 @@ import os
 import asyncio
 from flask import Flask, request, jsonify, render_template
 
-from src.agents.planner import planner
+from src.orchestrator import orchestrator
 from src.config.settings import FIRECRAWL_API_KEY
 
 app = Flask(__name__)
@@ -22,9 +22,9 @@ async def scrape():
         if not FIRECRAWL_API_KEY:
             return jsonify({"error": "Firecrawl API key not found in backend .env"}), 400
 
-        # Run the full pipeline using the PlannerAgent
+        # Run the full pipeline using the Orchestrator
         # We don't need to wrap in to_thread here because process_url is already async
-        result = await planner.process_url(url, mode, options)
+        result = await orchestrator.process_url(url, mode, options)
 
         if "error" in result:
             return jsonify({"error": result["error"]}), 500

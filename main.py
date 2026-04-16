@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import argparse
-from src.agents.planner import planner
+from src.orchestrator import orchestrator
 
 async def main():
     parser = argparse.ArgumentParser(description="Mu-Hive Intelligence Pipeline")
@@ -32,7 +32,7 @@ async def main():
         return
 
     print(f"=== Mu-Hive Pipeline Started (Total URLs: {len(target_urls)}) ===")
-    results = await planner.run_batch(target_urls, mode=args.mode)
+    results = await orchestrator.run_batch(target_urls, mode=args.mode)
     print("=== Pipeline Completed ===")
     
     # Simple summary of results
