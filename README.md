@@ -1,77 +1,52 @@
-# 🐝 Mu-Hive: Intelligence & Extraction Service
+# Mu-Hive  
 
-This directory contains the **Intelligence & Extraction Engine** for the Mu-Hive project. It is a multi-agent pipeline designed to autonomously scout, analyze, and store technical technical data from the web.
+## 🏗️ Project Blueprint
 
-> [!NOTE]
-> This is a component of the larger Mu-Hive ecosystem, focusing on the data acquisition and AI-driven intelligence layer.
+Here is the structure we are building:
 
----
+### Root Files
+*   **`.env.example` ->** Template for required API keys (OpenAI, Tavily, etc.).
+*   **`requirements.txt` ->** To be filled with project dependencies.
+*   **`config.yaml` ->** System-wide non-secret configurations.
+*   **`main.py` ->** The future entry point for the entire application.
 
-## 🏗️ Project Structure
+### The Source (`src/`)
+*   **`src/orchestrator.py` ->** The central logic that will coordinate agents and data flow.
+*   **`src/agents/` ->** Folder for specialized AI personas (Scout, Planner, etc.).
+*   **`src/llm/` ->** Wrappers and prompts for interacting with AI models.
+*   **`src/scraping/` ->** Tools for fetching raw data from the web.
+*   **`src/db/` ->** Database schemas and connection logic.
+*   **`src/config/` ->** Internal code configurations and constants.
 
-The project follows a decoupled, agentic architecture to ensure each component can be scaled or modified independently.
-
-```text
-IG PROJECT/
-├── main.py                 # CLI Entry Point (Batch processing & Pipeline execution)
-├── app.py                  # Optional Web Dashboard (Flask-based visualization)
-├── requirements.txt        # Project dependencies
-├── src/
-│   ├── agents/             # Core AI Agents
-│   │   ├── scout.py        # ScoutAgent: Handles Firecrawl scraping & serialization
-│   │   ├── intelligence.py  # IntelligenceAgent: Handles LLM-based summarization (Groq)
-│   │   └── planner.py      # PlannerAgent: Orchestrates the Scrape -> Analyze -> Store flow
-│   ├── db/
-│   │   └── database.py     # MongoDB connection & data persistence logic
-│   ├── config/
-│   │   └── settings.py     # Environment variable management
-│   └── llm/
-│       └── agent_config.py # LLM hyperparameter configurations
-└── templates/              # Dashboard UI components (HTML/JS)
-```
+### Utilities & Data
+*   **`scripts/` ->** One-off scripts for testing and setup verification.
+*   **`tests/` ->** Unit and integration tests for each module.
+*   **`data/` ->** Storage for raw exports (JSON/CSV).
 
 ---
 
-## ⚙️ Core Pipeline Logic
+## 🛠️ Current Status: Bootstrapping
 
-The system operates on an automated pipeline managed by the **Planner Agent**:
+###  Installation
 
-1.  **Scouting**: The `ScoutAgent` uses the Firecrawl API to extract high-quality Markdown from target URLs (single page or full crawl).
-2.  **Intelligence**: The raw data is passed to the `IntelligenceAgent`, which uses **Groq (Llama-3.1-8B)** to generate concise technical summaries.
-3.  **Persistence**: The resulting intelligence (URL, raw data, and AI summary) is stored in **MongoDB Atlas** for use by other Mu-Hive modules.
-
----
-
-## 🚀 Usage
-
-### Standalone Pipeline (Recommended for Group Integration)
-Use the CLI to process tasks in the background or batch.
+#### Using `uv` 
 ```bash
-# Single URL
-python main.py --urls https://example.com
-
-# Batch URLs
-python main.py --urls site1.com site2.com --mode crawl
-
-# Load from file
-python main.py --file targets.txt
+# Install dependencies
+uv init
+uv add -r requirements.txt
 ```
 
-### Dashboard (For Visualization)
+#### Using standard `pip`
 ```bash
-python app.py
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
-Visit `http://localhost:5000` to interact with the scraper and view AI summaries in real-time.
 
----
-
-## 🛠️ Configuration
-Ensure your `.env` contains the keys for the components:
-- `FIRECRAWL_API_KEY`: For web extraction.
-- `GROQ_API_KEY`: For AI analysis.
-- `MONGO_URI`: For data persistence.
-
----
-
-## 👥 Contributors
-This is a group project. Please ensure that logic changes are made within the `src/agents/` directory to maintain the decoupled architecture.
+### Next Steps
+*   Define core schemas in `src/db/`.
+*   Implement basic LLM wrapper in `src/llm/`.
+*   Create the first agents in `src/agents/`.
