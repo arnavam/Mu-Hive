@@ -8,6 +8,11 @@ primp==1.2.0
 pymongo==4.16.0
 schedule==1.2.2
 requests==2.32.3
-scrapy
+playwright
+playwright-stealth
 trafilatura
+httpx
+beautifulsoup4
+readability-lxml
+newspaper4k
 python-dotenv

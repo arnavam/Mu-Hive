@@ -50,7 +50,8 @@ class Database:
         status,
         scraped_page_title=None,
         scraped_meta_description=None,
-        scraped_text_summary=None,
+        scraped_full_text=None,
+        scrape_layer=None,
         scrape_error=None,
     ):
         """Attach scrape results to the event document identified by _id."""
@@ -62,8 +63,10 @@ class Database:
             fields["scraped_page_title"] = scraped_page_title
         if scraped_meta_description is not None:
             fields["scraped_meta_description"] = scraped_meta_description
-        if scraped_text_summary is not None:
-            fields["scraped_text_summary"] = scraped_text_summary
+        if scraped_full_text is not None:
+            fields["scraped_full_text"] = scraped_full_text
+        if scrape_layer is not None:
+            fields["scrape_layer"] = scrape_layer
         if scrape_error is not None:
             fields["scrape_error"] = scrape_error
         else:

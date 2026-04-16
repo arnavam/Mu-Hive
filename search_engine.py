@@ -45,9 +45,15 @@ def run_search_agent(keywords, categories, max_result=5):
             if not results:
                 print("   No results found.")
             else:
+                SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
                 for i, result in enumerate(results, start=1):
                     title = result.get('title', 'No Title')
                     link = result.get('href', result.get('url', 'No Link'))
+                    
+                    if any(spam in link for spam in SPAM_DOMAINS):
+                        print(f"{i}. [Skip] Spam domain filtered: {link}")
+                        continue
+
                     print(f"{i}. [{source_engine}] {title}")
                     print(f"   Link: {link}")
                     
