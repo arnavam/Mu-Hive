@@ -32,7 +32,8 @@ def run_search_agent(keywords, categories, max_result=5):
             
             try:
                 # Get top results for each expanded query via DuckDuckGo
-                results = list(ddgs.text(query, max_results=max_result))
+                # Setting safesearch='moderate' and timelimit='y' helps filter out obscure/spam domains.
+                results = list(ddgs.text(query, max_results=max_result, safesearch='moderate', timelimit='y'))
             except Exception as ddg_error:
                 print(f"   [!] DuckDuckGo failed ({ddg_error}). Falling back to Tavily...")
                 source_engine = 'Tavily'
@@ -50,8 +51,11 @@ def run_search_agent(keywords, categories, max_result=5):
                     title = result.get('title', 'No Title')
                     link = result.get('href', result.get('url', 'No Link'))
                     
-                    if any(spam in link for spam in SPAM_DOMAINS):
-                        print(f"{i}. [Skip] Spam domain filtered: {link}")
+                    # Ensure high quality by filtering spam domains and low-reputation TLDs
+                    is_spam = any(spam in link for spam in SPAM_DOMAINS)
+                    is_low_quality = any(link.endswith(tld) or (tld + "/") in link for tld in [".xyz", ".info", ".top", ".cc", ".biz"])
+                    if is_spam or is_low_quality:
+                        print(f"{i}. [Skip] Filtered low-quality or spam domain: {link}")
                         continue
 
                     print(f"{i}. [{source_engine}] {title}")
@@ -83,7 +87,7 @@ def get_tavily_results(query, max_results=5):
     }
     payload = {
         "query": query,
-        "search_depth": "basic",
+        "search_depth": "advanced",
         "include_answer": False,
         "max_results": max_results
     }
