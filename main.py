@@ -1,17 +1,17 @@
 """
 Run search first (collect links into MongoDB), then scrape pending links.
 """
-from search_engine import run_search_agent
-from scraper_agent import run_scraper_agent
+from src.scraping.search_engine import run_search_agent
+from src.scraping.scraper_agent import run_scraper_agent
 import asyncio
 
-def main():
+async def main():
     keywords = ["Artificial intelligence", "web development"]
     categories = ["internships", "Current news", "workshops", "events", "hackathons"]
 
     run_search_agent(keywords, categories)
-    asyncio.run(run_scraper_agent())
+    await run_scraper_agent()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

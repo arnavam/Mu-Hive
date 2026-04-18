@@ -5,9 +5,9 @@ import requests
 import time
 import os 
 from dotenv import load_dotenv
-from database import Database
+from src.db.database import Database
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 def run_search_agent(keywords, categories, max_result=5):
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
@@ -46,7 +46,8 @@ def run_search_agent(keywords, categories, max_result=5):
             if not results:
                 print("   No results found.")
             else:
-                SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
+                SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com", "youtube.com", "facebook.com", "instagram.com",
+    "tiktok.com"]
                 for i, result in enumerate(results, start=1):
                     title = result.get('title', 'No Title')
                     link = result.get('href', result.get('url', 'No Link'))

@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from search_engine import get_tavily_results
+from src.scraping.search_engine import get_tavily_results
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
