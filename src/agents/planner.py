@@ -1,5 +1,5 @@
 import logging
-from src.db.database import get_connection
+from src.db.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -12,37 +12,26 @@ def plan_digests():
     Returns a dictionary mapping each IG to a list of its top articles.
     """
     logger.info("Initializing Planner Agent...")
-    conn = get_connection()
-    cursor = conn.cursor()
+    db = Database()
     digests = {}
     
     for ig in MVP_IGS:
-        # SQLite trick: finding a specific tag within the JSON array by searching the raw string.
-        # Ensure we only pick explicitly evaluated content (quality_score >= 5).
-        # Limits to Top 5 items per IG week to prevent spam.
-        query = '''
-            SELECT title, summary, link, quality_score 
-            FROM opportunities 
-            WHERE ig_tags LIKE ? AND quality_score >= 5
-            ORDER BY quality_score DESC
-            LIMIT 5
-        '''
-        # We search exactly for the quoted string e.g., '%"AI"%'
-        cursor.execute(query, (f'%"{ig}"%',))
-        rows = cursor.fetchall()
+        # Fetch directly from MongoDB helper method
+        rows = db.get_top_opportunities_by_ig(ig, limit=5)
         
         opportunities = []
         for r in rows:
             opportunities.append({
-                "title": r[0],
-                "summary": r[1],
-                "link": r[2],
-                "score": r[3]
+                "title": r.get("title", "No Title"),
+                "summary": r.get("summary", ""),
+                "link": r.get("link", ""),
+                "score": r.get("quality_score", 0)
             })
         
         if opportunities:
             digests[ig] = opportunities
             logger.info(f"Planner selected {len(opportunities)} items for {ig}.")
             
-    conn.close()
+    db.close()
     return digests
+

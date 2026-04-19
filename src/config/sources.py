@@ -26,3 +26,36 @@ AI_RSS_FEEDS = [
     "https://www.reddit.com/r/artificial/.rss",
     "https://www.reddit.com/r/MachineLearning/.rss",
 ]
+
+WEB_DEV_RSS_FEEDS = [
+    "https://css-tricks.com/feed/",
+    "https://smashingmagazine.com/feed/",
+    "https://frontendfoc.us/rss",
+    "https://davidwalsh.name/feed"
+]
+
+UI_UX_RSS_FEEDS = [
+    "https://uxdesign.cc/feed",
+    "https://www.awwwards.com/blog/feed/",
+    "https://uxplanet.org/feed"
+]
+
+CYBER_SEC_RSS_FEEDS = [
+    "https://krebsonsecurity.com/feed/",
+    "https://www.darkreading.com/rss",
+    "https://thehackernews.com/feeds/posts/default"
+]
+
+DATA_SCIENCE_RSS_FEEDS = [
+    "https://towardsdatascience.com/feed",
+    "https://www.kdnuggets.com/feed",
+    "https://datatau.net/rss"
+]
+
+ALL_RSS_FEEDS = {
+    "AI": AI_RSS_FEEDS,
+    "Web Development": WEB_DEV_RSS_FEEDS,
+    "UI/UX": UI_UX_RSS_FEEDS,
+    "Cyber Security": CYBER_SEC_RSS_FEEDS,
+    "Data Science": DATA_SCIENCE_RSS_FEEDS
+}

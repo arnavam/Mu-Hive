@@ -1,5 +1,5 @@
 import logging
-from src.db.database import init_db
+from src.db.database import Database
 from src.agents.scout import run_scout
 from src.agents.intelligence import run_intelligence
 from src.agents.communicator import run_communicator
@@ -12,10 +12,12 @@ def run_pipeline():
     logger.info("Mu-Hive Intelligence Pipeline - Starting")
     logger.info("=" * 50)
 
-    logger.info("Phase 1: Initializing database...")
-    init_db()
+    logger.info("Phase 1: Initializing database connection...")
+    db = Database()
+    logger.info(f"Connected to MongoDB. Active collections: {db.db.list_collection_names()}")
+    db.close()
 
-    logger.info("Phase 2: Running Scout Agent (RSS feed collection)...")
+    logger.info("Phase 2: Running Scout Agent (Search & Scraping)...")
     run_scout()
 
     logger.info("Phase 3: Running Intelligence Agent (LLM evaluation)...")
@@ -25,3 +27,7 @@ def run_pipeline():
     run_communicator()
 
     logger.info("Pipeline execution complete.")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    run_pipeline()
