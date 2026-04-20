@@ -4,22 +4,26 @@ from src.agents.planner import plan_digests
 logger = logging.getLogger(__name__)
 
 
-def format_digest(ig, opportunities):
+def format_digest(ig, opportunities_by_cat):
     """Formats a curated digest block for terminal display."""
     separator = "=" * 60
     output = f"\n{separator}\n"
     output += f"  >> TOP {ig.upper()} OPPORTUNITIES\n"
     output += f"{separator}\n\n"
 
-    for idx, opp in enumerate(opportunities, 1):
-        output += f"  {idx}. {opp['title']}\n"
-        output += f"     Score: {opp['score']}/10\n"
-        output += f"     Link:  {opp['link']}\n"
-        # Truncate long summaries for clean terminal output
-        summary = opp['summary'][:200]
-        if len(opp['summary']) > 200:
-            summary += "..."
-        output += f"     {summary}\n\n"
+    for cat_name, opps in opportunities_by_cat.items():
+        output += f"  --- {cat_name.upper()} ---\n"
+        for idx, opp in enumerate(opps, 1):
+            output += f"  {idx}. {opp['title']}\n"
+            output += f"     Score: {opp['score']}/10\n"
+            output += f"     Link:  {opp['link']}\n"
+            # Truncate long summaries for clean terminal output
+            summary = opp['summary'][:200]
+            if len(opp['summary']) > 200:
+                summary += "..."
+            # Replace literal literal literal literal newline characters with actual newlines
+            summary = summary.replace('\\n', '\n     ')
+            output += f"     {summary}\n\n"
 
     return output
 
@@ -37,10 +41,11 @@ def run_communicator():
     print("       MU-HIVE INTELLIGENCE DIGEST")
     print("=" * 60)
 
-    for ig, opportunities in digests.items():
-        digest_text = format_digest(ig, opportunities)
+    for ig, opportunities_by_cat in digests.items():
+        digest_text = format_digest(ig, opportunities_by_cat)
         print(digest_text)
-        logger.info(f"Displayed {len(opportunities)} curated items for IG: {ig}")
+        total_items = sum(len(cat_list) for cat_list in opportunities_by_cat.values())
+        logger.info(f"Displayed {total_items} curated items for IG: {ig}")
 
     print("=" * 60)
     print("  Pipeline complete. All digests displayed above.")

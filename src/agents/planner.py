@@ -19,18 +19,23 @@ def plan_digests():
         # Fetch directly from MongoDB helper method
         rows = db.get_top_opportunities_by_ig(ig, limit=5)
         
-        opportunities = []
+        opportunities_by_cat = {}
         for r in rows:
-            opportunities.append({
+            cat = r.get("category", "News")
+            if cat not in opportunities_by_cat:
+                opportunities_by_cat[cat] = []
+                
+            opportunities_by_cat[cat].append({
                 "title": r.get("title", "No Title"),
                 "summary": r.get("summary", ""),
                 "link": r.get("link", ""),
                 "score": r.get("quality_score", 0)
             })
         
-        if opportunities:
-            digests[ig] = opportunities
-            logger.info(f"Planner selected {len(opportunities)} items for {ig}.")
+        if opportunities_by_cat:
+            digests[ig] = opportunities_by_cat
+            total_items = sum(len(cat_list) for cat_list in opportunities_by_cat.values())
+            logger.info(f"Planner selected {total_items} items for {ig}.")
             
     db.close()
     return digests

@@ -50,17 +50,18 @@ class Database:
     def link_exists(self, link):
         return self.opportunities.find_one({"link": link}) is not None
         
-    def insert_opportunity(self, title, link, summary="", source_engine="RSS", ig_tags=None, is_processed=False):
+    def insert_opportunity(self, title, link, summary="", source_engine="RSS", ig_tags=None, category="News", is_processed=False, quality_score=None):
         """Insert a new opportunity event into the database."""
         event_doc = {
             "title": title,
             "link": link,
             "summary": summary,
             "source_engine": source_engine,
+            "category": category,
             "status": "not processed" if not is_processed else "processed",
             "is_processed": is_processed,
             "ig_tags": ig_tags if ig_tags else [],
-            "quality_score": None,
+            "quality_score": quality_score,
             "created_at": datetime.datetime.now(datetime.UTC),
             "scraped_full_text": None,
             "scrape_layer": None
