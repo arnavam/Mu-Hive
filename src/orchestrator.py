@@ -29,7 +29,7 @@ class Orchestrator:
             # 3. Database Storage
             print(f"[3/3] [DB] Saving result to database...")
             # We use a thread since pymongo is blocking
-            await asyncio.to_thread(db.save_scrape_result, url, mode, scraped_data, summary)
+            await asyncio.to_thread(db.save_scrape_result, url, scraped_data, summary)
 
             print(f"[+] [Orchestrator] Successfully processed: {url}")
             return {

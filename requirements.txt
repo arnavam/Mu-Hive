@@ -1,5 +1,5 @@
 flask
-pymongo
+psycopg2-binary
 python-dotenv
 firecrawl-py
 groq
