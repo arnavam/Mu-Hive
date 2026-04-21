@@ -1,6 +1,8 @@
-requests
-beautifulsoup4
-pandas
-selenium
-webdriver-manager
-playwright
+aiohttp
+aiofiles
+pytest
+pytest-asyncio
+pymongo
+python-dotenv
+certifi
+dnspython
