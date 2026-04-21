@@ -26,16 +26,81 @@ class OpportunityIntelligence(BaseModel):
     )
 
 
+INTELLIGENCE_SYSTEM_PROMPT = """\
+You are an expert technical intelligence classifier for Mu-Hive, a tech community platform.
+Your job is to evaluate scraped articles/opportunities and classify them into the correct Interest Groups (IGs).
+
+## Interest Group Definitions (ONLY tag if content is DIRECTLY about these topics):
+
+- **AI**: Artificial intelligence, machine learning, deep learning, LLMs, NLP, computer vision, neural networks, GenAI, AI research papers, AI tools and frameworks (TensorFlow, PyTorch, Hugging Face).
+- **Data Science**: Data analytics, data engineering, big data, data visualization, statistical modeling, Kaggle, pandas, business intelligence, data pipelines.
+- **Web Development**: Frontend/backend development, JavaScript, TypeScript, React, Next.js, Node.js, Django, Flask, Vue, Angular, HTML/CSS, web frameworks, APIs, DevOps, cloud deployment.
+- **Cyber Security**: Cybersecurity, infosec, ethical hacking, penetration testing, CTFs, vulnerability disclosures, malware analysis, threat intelligence, SOC, network security, zero-day exploits, trojans, phishing, ransomware, NFC attacks, data breaches, APT campaigns.
+- **UI/UX**: User experience design, user interface design, UX research, Figma, prototyping, wireframing, interaction design, product design, usability testing, design systems.
+
+## Strict Classification Rules:
+1. ONLY tag an IG if the content is DIRECTLY and PRIMARILY about that domain. Do NOT tag loosely related content.
+2. Political news, sports, entertainment, world events, opinion pieces about non-tech topics, and general business news are NEVER relevant. Set is_relevant=False and quality_score=1 for these.
+3. If the content mentions tech only tangentially (e.g., a political article that briefly mentions AI policy), it is NOT relevant.
+4. Be strict with quality scores: 1-3 = low quality/irrelevant, 4-5 = borderline, 6-7 = good, 8-9 = very good, 10 = groundbreaking.
+5. If content has no clear connection to ANY tech Interest Group, set is_relevant=False and quality_score=1.
+6. A single article can belong to multiple IGs ONLY if it substantively covers multiple domains.
+
+## Common Misclassification Errors — DO NOT make these mistakes:
+- Malware, trojans, phishing, NFC attacks, data breaches, ransomware, APT groups → these are ONLY "Cyber Security", NEVER "AI"
+- An article about a security vulnerability or hacking campaign is NOT "AI" just because it involves technology
+- Hardware news, chip manufacturing, semiconductor news → NOT any IG unless it is specifically about AI chips/models
+- General tech company earnings, mergers, layoffs → NOT relevant unless specifically about the IG's domain
+- A cybersecurity tool that uses ML internally is still "Cyber Security", NOT "AI" — classify by the article's PRIMARY topic
+- Design of physical products, architecture, fashion design → NOT "UI/UX" (UI/UX is digital interface design only)
+"""
+
 intelligence_agent = Agent(
     model,
     output_type=OpportunityIntelligence,
-    system_prompt=(
-        "You are an expert technical intelligence agent for Mu-Hive. "
-        "Your job is to read the title and text content of a scraped tech article/opportunity. "
-        "You must evaluate its quality on a scale of 1-10 and precisely categorize it into the correct Interest Groups. "
-        "Be strict about quality (rarely give 10s unless groundbreaking) and never hallucinate tags outside the provided literals."
-    ),
+    system_prompt=INTELLIGENCE_SYSTEM_PROMPT,
 )
+
+
+# Keywords that strongly indicate a specific IG — used for post-LLM validation
+_CYBER_KEYWORDS = {
+    "malware", "trojan", "ransomware", "phishing", "vulnerability", "exploit",
+    "cve-", "apt", "breach", "nfc attack", "botnet", "zero-day", "0day",
+    "backdoor", "infosec", "threat actor", "campaign", "stealing", "fraud",
+    "hacker", "hacking", "cyberattack", "data theft", "pin", "atm fraud",
+}
+
+def _validate_tags(llm_tags: list, title: str, content: str, source_ig: list) -> list:
+    """
+    Post-LLM validation: cross-check LLM tags against content keywords
+    to catch obvious misclassifications (e.g., malware tagged as AI).
+    """
+    title_lower = title.lower()
+    content_lower = content[:2000].lower() if content else ""
+    combined = title_lower + " " + content_lower
+    
+    # Check if content is clearly cybersecurity
+    is_clearly_cyber = any(kw in combined for kw in _CYBER_KEYWORDS)
+    
+    if is_clearly_cyber:
+        # If content is clearly cyber, remove AI/Data Science/Web Dev/UI-UX tags
+        # unless original source also tagged it as those IGs
+        validated = []
+        for tag in llm_tags:
+            if tag == "Cyber Security":
+                validated.append(tag)
+            elif tag in source_ig:
+                # Trust the source if it originally tagged this IG too
+                validated.append(tag)
+            else:
+                logger.info(f"  -> Validation removed spurious tag '{tag}' (content is clearly Cyber Security)")
+        
+        # Ensure Cyber Security is in the list
+        if "Cyber Security" not in validated:
+            validated.append("Cyber Security")
+        return validated
+    
+    return llm_tags
 
 
 def run_intelligence(batch_limit=15):
@@ -59,8 +124,17 @@ def run_intelligence(batch_limit=15):
         title = doc.get("title", "")
         # Use full extracted text if available; otherwise fallback to summary
         content = doc.get("scraped_full_text") or doc.get("summary", "")
+        category = doc.get("category", "Unknown")
+        source_ig = doc.get("ig_tags", [])
         
-        prompt = f"Title: {title}\nContent: {content}\n\nEvaluate and classify this."
+        # Include source context so LLM can validate/reject initial classification
+        prompt = (
+            f"Title: {title}\n"
+            f"Category: {category}\n"
+            f"Original IG Tags (from source — validate or override these): {source_ig}\n"
+            f"Content: {content[:3000]}\n\n"
+            f"Evaluate this content's relevance and quality. Classify into the correct Interest Groups."
+        )
         logger.info(f"Evaluating ID {item_id}: {title[:60]}...")
 
         try:
@@ -69,9 +143,12 @@ def run_intelligence(batch_limit=15):
 
             final_score = intelligence.quality_score if intelligence.is_relevant else 0
             
-            db.update_intelligence(item_id, final_score, intelligence.ig_tags)
+            # Post-LLM validation to catch misclassifications
+            validated_tags = _validate_tags(intelligence.ig_tags, title, content, source_ig)
+            
+            db.update_intelligence(item_id, final_score, validated_tags)
             processed_count += 1
-            logger.info(f"  -> Score: {final_score} | Tags: {intelligence.ig_tags}")
+            logger.info(f"  -> Score: {final_score} | Tags: {validated_tags} | {intelligence.reasoning}")
 
             time.sleep(3)
         except Exception as e:

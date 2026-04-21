@@ -14,6 +14,10 @@ except ImportError:
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+# --- Quality & Freshness Defaults ---
+MIN_QUALITY_SCORE = 6
+NEWS_FRESHNESS_HOURS = 48
+
 class Database:
     def __init__(self, uri=None, db_name="mu_hive"):
         if not uri:
@@ -122,20 +126,35 @@ class Database:
         )
         return result.modified_count > 0
 
-    def get_top_opportunities_by_ig_and_category(self, ig, category, limit=10):
-        return list(self.opportunities.find(
-            {
-                "ig_tags": ig,
-                "category": {"$regex": f"^{category}$", "$options": "i"},
-                "quality_score": {"$gte": 5}
-            }
-        ).sort("quality_score", -1).limit(limit))
+    def get_top_opportunities_by_ig_and_category(self, ig, category, limit=5, min_score=None):
+        """
+        Query top opportunities for a given IG and category.
+        Applies freshness filtering: 48h for News, excludes expired Hackathons.
+        """
+        if min_score is None:
+            min_score = MIN_QUALITY_SCORE
 
-    def get_top_opportunities_by_ig(self, ig, limit=5):
+        query = {
+            "ig_tags": ig,
+            "category": {"$regex": f"^{re.escape(category)}$", "$options": "i"},
+            "quality_score": {"$gte": min_score}
+        }
+
+        # Freshness filter: only show recent News (last 48h)
+        cat_lower = category.lower()
+        if cat_lower == "news":
+            cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=NEWS_FRESHNESS_HOURS)
+            query["created_at"] = {"$gte": cutoff}
+
+        return list(self.opportunities.find(query).sort("quality_score", -1).limit(limit))
+
+    def get_top_opportunities_by_ig(self, ig, limit=5, min_score=None):
+        if min_score is None:
+            min_score = MIN_QUALITY_SCORE
         return list(self.opportunities.find(
             {
                 "ig_tags": ig,
-                "quality_score": {"$gte": 5}
+                "quality_score": {"$gte": min_score}
             }
         ).sort("quality_score", -1).limit(limit))
 

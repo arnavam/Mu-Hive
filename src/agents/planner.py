@@ -9,7 +9,8 @@ MVP_IGS = ["AI", "Data Science", "Web Development", "Cyber Security", "UI/UX"]
 def plan_digests():
     """
     Queries database for the highest scored opportunities strictly mapping to each IG.
-    Returns a dictionary mapping each IG to a list of its top articles.
+    Returns a dictionary mapping each IG to a dict of categories, each containing a list of items.
+    Passes rich metadata to the communicator for proper formatting.
     """
     logger.info("Initializing Planner Agent...")
     db = Database()
@@ -20,7 +21,7 @@ def plan_digests():
     for ig in MVP_IGS:
         opportunities_by_cat = {}
         for cat in categories:
-            rows = db.get_top_opportunities_by_ig_and_category(ig, cat, limit=10)
+            rows = db.get_top_opportunities_by_ig_and_category(ig, cat, limit=5)
             if rows:
                 opportunities_by_cat[cat] = []
                 for r in rows:
@@ -28,7 +29,10 @@ def plan_digests():
                         "title": r.get("title", "No Title"),
                         "summary": r.get("summary", ""),
                         "link": r.get("link", ""),
-                        "score": r.get("quality_score", 0)
+                        "score": r.get("quality_score", 0),
+                        "source_engine": r.get("source_engine", ""),
+                        "category": cat,
+                        "created_at": r.get("created_at", None),
                     })
         
         if opportunities_by_cat:
@@ -38,4 +42,3 @@ def plan_digests():
             
     db.close()
     return digests
-

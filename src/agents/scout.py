@@ -35,6 +35,62 @@ try:
 except ImportError:
     HAS_NEWSPAPER = False
 
+# --- Curated, IG-specific search queries for relevance ---
+SEARCH_QUERIES = {
+    "AI": {
+        "news": [
+            "artificial intelligence AI breakthroughs 2026",
+            "LLM large language model releases news",
+            "generative AI industry updates",
+        ],
+        "hackathons": ["AI machine learning hackathon 2026"],
+        "internships": ["machine learning AI internship 2026"],
+        "events": ["AI conference summit tech event 2026"],
+        "workshops": ["AI deep learning hands-on workshop 2026"],
+    },
+    "Web Development": {
+        "news": [
+            "web development JavaScript React framework news 2026",
+            "frontend backend web dev trends",
+        ],
+        "hackathons": ["web development hackathon frontend backend 2026"],
+        "internships": ["web developer frontend backend internship 2026"],
+        "events": ["web development conference meetup 2026"],
+        "workshops": ["React Node.js web development workshop 2026"],
+    },
+    "UI/UX": {
+        "news": [
+            "UX design trends user experience 2026",
+            "Figma UI design product design updates",
+        ],
+        "hackathons": ["UI UX design hackathon designathon 2026"],
+        "internships": ["UX designer product design internship 2026"],
+        "events": ["UX UI design conference summit 2026"],
+        "workshops": ["Figma prototyping UX design workshop 2026"],
+    },
+    "Cyber Security": {
+        "news": [
+            "cybersecurity vulnerability zero-day threat 2026",
+            "infosec security breach advisory news",
+        ],
+        "hackathons": ["CTF capture the flag cybersecurity hackathon 2026"],
+        "internships": ["cybersecurity SOC analyst intern 2026"],
+        "events": ["cybersecurity infosec conference 2026"],
+        "workshops": ["penetration testing ethical hacking workshop 2026"],
+    },
+    "Data Science": {
+        "news": [
+            "data science analytics trends 2026",
+            "big data engineering visualization news",
+        ],
+        "hackathons": ["data science analytics Kaggle hackathon 2026"],
+        "internships": ["data scientist analytics intern 2026"],
+        "events": ["data science analytics conference 2026"],
+        "workshops": ["Python data science pandas workshop 2026"],
+    },
+}
+
+
 def clean_html(html_content):
     if not html_content:
         return ""
@@ -83,38 +139,43 @@ def get_tavily_results(query, max_results=3):
         return []
 
 def run_search_agent(db: Database):
+    """Search engine agent using curated, IG-specific queries for relevance."""
     logger.info("Running Search Engine Agent...")
-    keywords = list(ALL_RSS_FEEDS.keys())
-    categories = ["news", "events", "hackathons", "internships", "workshops"]
     
     ddgs = DDGS()
-    SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "youtube.com", "facebook.com", "instagram.com", "tiktok.com"]
+    SPAM_DOMAINS = [
+        "bloguerosa.com", "qodsblog.com", "blogdeazar.com",
+        "youtube.com", "facebook.com", "instagram.com", "tiktok.com",
+        "pinterest.com", "reddit.com", "quora.com"
+    ]
     new_count = 0
 
-    for keyword in keywords:
-        for category in categories:
-            query = f"{keyword} {category}"
-            try:
+    for ig, categories in SEARCH_QUERIES.items():
+        for category, queries in categories.items():
+            for query in queries:
                 try:
-                    results = list(ddgs.text(query, max_results=3, safesearch='moderate', timelimit='d'))
-                    source = 'DuckDuckGo'
-                except Exception:
-                    results = get_tavily_results(query, 3)
-                    source = 'Tavily'
-                    
-                if not results: continue
+                    try:
+                        results = list(ddgs.text(query, max_results=3, safesearch='moderate', timelimit='d'))
+                        source = 'DuckDuckGo'
+                    except Exception:
+                        results = get_tavily_results(query, 3)
+                        source = 'Tavily'
+                        
+                    if not results: continue
 
-                for result in results:
-                    title = result.get('title', 'No Title')
-                    link = result.get('href', result.get('url', ''))
-                    if not link: continue
-                    if any(spam in link for spam in SPAM_DOMAINS) or link.endswith(('.xyz', '.info')):
-                        continue
-                    if db.insert_opportunity(title, link, source_engine=source, ig_tags=[keyword], category=category.capitalize()):
-                        new_count += 1
-            except Exception as e:
-                logger.warning(f"Error searching '{query}': {e}")
-            time.sleep(1)
+                    for result in results:
+                        title = result.get('title', 'No Title')
+                        link = result.get('href', result.get('url', ''))
+                        if not link: continue
+                        if any(spam in link for spam in SPAM_DOMAINS) or link.endswith(('.xyz', '.info')):
+                            continue
+                        # Extract summary/snippet from search results
+                        summary = result.get('body', result.get('content', result.get('snippet', '')))
+                        if db.insert_opportunity(title, link, summary=summary, source_engine=source, ig_tags=[ig], category=category.capitalize()):
+                            new_count += 1
+                except Exception as e:
+                    logger.warning(f"Error searching '{query}': {e}")
+                time.sleep(1)
     logger.info(f"Search Engine inserted {new_count} new opportunities.")
 
 def extract(html: str) -> str:
@@ -134,7 +195,7 @@ def extract(html: str) -> str:
 
 
 
-# --- JOSHNA HACKATHON APIs ---
+# --- HACKATHON APIs ---
 
 # API Endpoints
 DEVFOLIO_API = "https://api.devfolio.co/api/search/hackathons"
@@ -143,15 +204,33 @@ DEVPOST_API = "https://devpost.com/api/hackathons"
 HACKEREARTH_API = "https://www.hackerearth.com/api/events/upcoming/"
 
 def normalize_event(name, platform, link, start, end, tags, location="", prize="", cost="", elig=""):
+    """Normalize a hackathon event, extracting tag names from dict-style tags."""
+    cleaned_tags = []
+    if isinstance(tags, list):
+        for t in tags:
+            if not t:
+                continue
+            if isinstance(t, dict):
+                # Extract 'name' field from API tag objects (Devfolio, Unstop, etc.)
+                tag_name = t.get("name", t.get("title", ""))
+                if tag_name:
+                    cleaned_tags.append(str(tag_name).strip())
+            else:
+                cleaned_tags.append(str(t).strip())
+    
+    # Strip HTML from prize pool (Devpost returns HTML-wrapped values)
+    if prize:
+        prize = clean_html(str(prize))
+
     return {
         "eventName": str(name).strip() if name else "Unknown",
         "platform": platform,
         "registrationLink": link if link else "",
         "startDate": str(start).strip() if start else "TBA",
         "endDate": str(end).strip() if end else "TBA",
-        "tags": [str(t).strip() for t in tags if t] if isinstance(tags, list) else [],
+        "tags": cleaned_tags,
         "location": str(location).strip() if location else "Online",
-        "prizePool": str(prize).strip() if prize else "",
+        "prizePool": prize if prize else "",
         "cost": str(cost).strip() if cost else "Free",
         "eligibility": str(elig).strip() if elig else "Students"
     }
@@ -181,11 +260,11 @@ async def fetch_devfolio_page(session, semaphore, offset):
                         except Exception:
                             continue
         except Exception as e:
-            pass
+            logger.warning(f"Devfolio page fetch error (offset {offset}): {e}")
     return events
 
 async def get_all_devfolio(session, semaphore):
-    print("[*] Starting Devfolio API concurrent extraction...")
+    logger.info("Starting Devfolio API concurrent extraction...")
     offset = 0
     all_events = []
     while offset < 2500:
@@ -201,7 +280,7 @@ async def get_all_devfolio(session, semaphore):
         if empty_page_found:
             break
         offset += 250
-    print(f"[+] Devfolio complete. Found {len(all_events)} events.")
+    logger.info(f"Devfolio complete. Found {len(all_events)} events.")
     return all_events
 
 async def fetch_unstop_page(session, semaphore, page):
@@ -232,7 +311,7 @@ async def fetch_unstop_page(session, semaphore, page):
     return events
 
 async def get_all_unstop(session, semaphore):
-    print("[*] Starting Unstop API concurrent extraction...")
+    logger.info("Starting Unstop API concurrent extraction...")
     page = 1
     all_events = []
     while page < 50:
@@ -248,7 +327,7 @@ async def get_all_unstop(session, semaphore):
         if empty_page_found:
             break
         page += 5
-    print(f"[+] Unstop complete. Found {len(all_events)} events.")
+    logger.info(f"Unstop complete. Found {len(all_events)} events.")
     return all_events
 
 async def fetch_devpost_page(session, semaphore, page):
@@ -278,10 +357,12 @@ async def fetch_devpost_page(session, semaphore, page):
     return events
 
 async def get_all_devpost(session, semaphore):
-    print("[*] Starting Devpost API concurrent extraction...")
+    logger.info("Starting Devpost API concurrent extraction...")
     page = 1
     all_events = []
     while page < 50:
+        # FIX: tasks variable was undefined — now properly creates page fetch tasks
+        tasks = [fetch_devpost_page(session, semaphore, p) for p in range(page, page + 5)]
         results = await asyncio.gather(*tasks)
         
         empty_page_found = False
@@ -293,7 +374,7 @@ async def get_all_devpost(session, semaphore):
         if empty_page_found:
             break
         page += 5
-    print(f"[+] Devpost complete. Found {len(all_events)} events.")
+    logger.info(f"Devpost complete. Found {len(all_events)} events.")
     return all_events
 
 async def fetch_hackerearth_page(session, semaphore, page):
@@ -322,10 +403,12 @@ async def fetch_hackerearth_page(session, semaphore, page):
     return events
 
 async def get_all_hackerearth(session, semaphore):
-    print("[*] Starting HackerEarth API concurrent extraction...")
+    logger.info("Starting HackerEarth API concurrent extraction...")
     page = 1
     all_events = []
     while page < 50:
+        # FIX: tasks variable was undefined — now properly creates page fetch tasks
+        tasks = [fetch_hackerearth_page(session, semaphore, p) for p in range(page, page + 5)]
         results = await asyncio.gather(*tasks)
         
         empty_page_found = False
@@ -337,24 +420,121 @@ async def get_all_hackerearth(session, semaphore):
         if empty_page_found:
             break
         page += 5
-    print(f"[+] HackerEarth complete. Found {len(all_events)} events.")
+    logger.info(f"HackerEarth complete. Found {len(all_events)} events.")
     return all_events
 
 def map_hackathon_tags(tags):
+    """
+    Map hackathon tags to Interest Groups using precise keyword matching.
+    Uses specific multi-word phrases to avoid false positives.
+    """
     tag_map = {
-        "ai": "AI", "machine learning": "AI", "genai": "AI", "llm": "AI",
-        "data science": "Data Science", "data": "Data Science", "analytics": "Data Science",
-        "web": "Web Development", "frontend": "Web Development", "backend": "Web Development", "devops": "Web Development",
-        "cyber": "Cyber Security", "security": "Cyber Security", "crypto": "Cyber Security", "blockchain": "Cyber Security",
-        "ui": "UI/UX", "ux": "UI/UX", "design": "UI/UX"
+        # AI / Machine Learning
+        "artificial intelligence": "AI",
+        "machine learning": "AI",
+        "deep learning": "AI",
+        "genai": "AI",
+        "gen ai": "AI",
+        "generative ai": "AI",
+        "llm": "AI",
+        "natural language processing": "AI",
+        "nlp": "AI",
+        "computer vision": "AI",
+        "neural network": "AI",
+        "chatbot": "AI",
+        "tensorflow": "AI",
+        "pytorch": "AI",
+        "hugging face": "AI",
+        # Data Science
+        "data science": "Data Science",
+        "data analytics": "Data Science",
+        "big data": "Data Science",
+        "data engineering": "Data Science",
+        "data visualization": "Data Science",
+        "kaggle": "Data Science",
+        "statistics": "Data Science",
+        "pandas": "Data Science",
+        # Web Development
+        "web development": "Web Development",
+        "web dev": "Web Development",
+        "frontend": "Web Development",
+        "front-end": "Web Development",
+        "full stack": "Web Development",
+        "fullstack": "Web Development",
+        "backend": "Web Development",
+        "back-end": "Web Development",
+        "react": "Web Development",
+        "reactjs": "Web Development",
+        "nextjs": "Web Development",
+        "next.js": "Web Development",
+        "node.js": "Web Development",
+        "nodejs": "Web Development",
+        "javascript": "Web Development",
+        "typescript": "Web Development",
+        "django": "Web Development",
+        "flask": "Web Development",
+        "vue": "Web Development",
+        "angular": "Web Development",
+        "html": "Web Development",
+        "css": "Web Development",
+        "svelte": "Web Development",
+        # Cyber Security
+        "cybersecurity": "Cyber Security",
+        "cyber security": "Cyber Security",
+        "infosec": "Cyber Security",
+        "information security": "Cyber Security",
+        "penetration testing": "Cyber Security",
+        "pen testing": "Cyber Security",
+        "ethical hacking": "Cyber Security",
+        "ctf": "Cyber Security",
+        "capture the flag": "Cyber Security",
+        "network security": "Cyber Security",
+        "malware": "Cyber Security",
+        "vulnerability": "Cyber Security",
+        "soc": "Cyber Security",
+        "threat intelligence": "Cyber Security",
+        # UI/UX
+        "ui/ux": "UI/UX",
+        "ui ux": "UI/UX",
+        "user experience": "UI/UX",
+        "user interface": "UI/UX",
+        "ux design": "UI/UX",
+        "ui design": "UI/UX",
+        "product design": "UI/UX",
+        "interaction design": "UI/UX",
+        "figma": "UI/UX",
+        "prototyping": "UI/UX",
+        "wireframe": "UI/UX",
+        "usability": "UI/UX",
     }
     mapped_igs = set()
     for tag in tags:
-        t = str(tag).lower()
-        for k, v in tag_map.items():
-            if k in t:
-                mapped_igs.add(v)
+        t = str(tag).lower().strip()
+        for keyword, ig in tag_map.items():
+            if keyword in t:
+                mapped_igs.add(ig)
     return list(mapped_igs)
+
+
+def _compute_tag_confidence_score(ig_tags, tags):
+    """
+    Compute a quality score based on how many tags matched IG keywords.
+    Strong match (2+ mapped IGs or 3+ matching keywords) = 7
+    Weak match (1 mapped IG) = 6
+    """
+    if len(ig_tags) >= 2:
+        return 7
+    # Count how many raw tags matched
+    tag_map_keys = [
+        "artificial intelligence", "machine learning", "deep learning", "genai",
+        "data science", "data analytics", "big data",
+        "web development", "frontend", "full stack", "react", "javascript",
+        "cybersecurity", "ethical hacking", "ctf", "penetration testing",
+        "ui/ux", "ux design", "ui design", "figma", "product design",
+    ]
+    match_count = sum(1 for tag in tags if any(k in str(tag).lower() for k in tag_map_keys))
+    return 7 if match_count >= 3 else 6
+
 
 async def run_hackathon_apis(db: Database):
     logger.info("Running Hackathon API Scrapers...")
@@ -377,12 +557,22 @@ async def run_hackathon_apis(db: Database):
                 
     new_count = 0
     for ev in events:
-        summary = f"Platform: {ev['platform']}\nStart: {ev['startDate']}\nEnd: {ev['endDate']}\nLocation: {ev['location']}\nPrize Pool: {ev['prizePool']}\nCost: {ev['cost']}\nEligibility: {ev['eligibility']}\nTags: {', '.join(ev['tags'])}"
+        summary = (
+            f"Platform: {ev['platform']}\n"
+            f"Start: {ev['startDate']}\n"
+            f"End: {ev['endDate']}\n"
+            f"Location: {ev['location']}\n"
+            f"Prize Pool: {ev['prizePool']}\n"
+            f"Cost: {ev['cost']}\n"
+            f"Eligibility: {ev['eligibility']}\n"
+            f"Tags: {', '.join(ev['tags'])}"
+        )
         ig_tags = map_hackathon_tags(ev['tags'])
         
-        # Only insert if there is at least one mapped IG (will skip unmatched ones)
+        # Only insert if there is at least one mapped IG
         if ig_tags:
-            if db.insert_opportunity(ev['eventName'], ev['registrationLink'], summary, source_engine=ev['platform'], ig_tags=ig_tags, category="Hackathons", is_processed=True, quality_score=8):
+            score = _compute_tag_confidence_score(ig_tags, ev['tags'])
+            if db.insert_opportunity(ev['eventName'], ev['registrationLink'], summary, source_engine=ev['platform'], ig_tags=ig_tags, category="Hackathons", is_processed=True, quality_score=score):
                 new_count += 1
                 
     logger.info(f"Hackathon APIs inserted {new_count} new targeted opportunities.")
