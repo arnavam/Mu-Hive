@@ -1,12 +1,8 @@
-import hashlib
 import json
 import os
 from loguru import logger
-from .utils import load_config
-
-# Hashing helper
-def get_hash(item):
-    return hashlib.md5(f"{item.url}{item.title}".encode()).hexdigest()
+from ..config import load_config
+from ..state_manager import get_hash
 
 # Deduplication and Blocklist filtering
 def run_filter(items):

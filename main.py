@@ -2,12 +2,12 @@ import asyncio
 import sys
 import os
 from loguru import logger
-import src.stage_01_scraper as scraper
-import src.stage_02_filter as filter
-import src.stage_03_verifier as verifier
-import src.stage_04_structurer as structurer
-import src.stage_05_writer as output_writer
-from src.utils import load_config
+import src.pipeline.stage_01_scraper as scraper
+import src.pipeline.stage_02_filter as filter
+import src.pipeline.stage_03_verifier as verifier
+import src.pipeline.stage_04_structurer as structurer
+import src.pipeline.stage_05_writer as output_writer
+from src.config import load_config
 
 async def main():
     # 1. Setup

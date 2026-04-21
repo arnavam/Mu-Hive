@@ -9,8 +9,10 @@ from loguru import logger
 from ddgs import DDGS
 from newsapi import NewsApiClient
 from apify_client import ApifyClient
-from .schemas import RawItem
-from .utils import load_config, get_limiter, with_retry, get_random_ua
+from ..schemas import RawItem
+from ..config import load_config
+from ..http_utils import get_random_ua
+from ..retry import with_retry
 from aiolimiter import AsyncLimiter
 import warnings
 from bs4 import XMLParsedAsHTMLWarning

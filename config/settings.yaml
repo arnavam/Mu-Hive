@@ -7,6 +7,9 @@ pipeline:
   circuit_state_file: state/circuit_state.json
   retry_backoff_seconds: [1, 2, 4]
   max_retries: 3
+  verifier_concurrency: 2
+  structurer_concurrency: 2
+  circuit_cooldown_seconds: 300
   
   # High Efficiency Routing
   max_premium_items_per_run: 50

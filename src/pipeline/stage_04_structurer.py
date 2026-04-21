@@ -3,9 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Optional
 from loguru import logger
-from .utils import make_llm_client, get_limiter, with_retry, load_config, update_hashes_status
-from .schemas import CleanItem
-from .stage_02_filter import get_hash
+from ..llm_client import make_llm_client, get_limiter
+from ..retry import with_retry
+from ..config import load_config
+from ..state_manager import update_hashes_status, get_hash
+from ..schemas import CleanItem
 
 class Extraction(BaseModel):
     summary: str = Field(description="2-sentence summary")
@@ -63,9 +65,9 @@ async def run_structurer(verified_entries):
         
     settings = load_config("settings")["pipeline"]
     routing = settings.get("ig_routing", {})
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(settings["structurer_concurrency"])
     
-    logger.info(f"Structuring {len(verified_entries)} items with tiered routing (Concurrency: 2)...")
+    logger.info(f"Structuring {len(verified_entries)} items with tiered routing (Concurrency: {settings['structurer_concurrency']})...")
     final = []
     
     async def process_entry(entry):

@@ -2,7 +2,7 @@ import json
 import csv
 import os
 from loguru import logger
-from .utils import load_config
+from ..config import load_config
 
 # Console output writer
 def _write_console(items, cfg):

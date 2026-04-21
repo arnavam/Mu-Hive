@@ -3,37 +3,36 @@
 MuHive v1 is a production-grade, configuration-driven AI pipeline that autonomously discovers, verifies, and structures technical opportunities for student Interest Groups.
 
 ## 🚀 The High-Efficiency Engine (v1)
-This version features a sophisticated multi-brain architecture designed for maximum reliability and cost-efficiency, consolidating every scraping technique from all project branches.
+This version features a sophisticated modular architecture designed for maximum reliability and cost-efficiency, consolidating scraping techniques from all project branches into a unified, parallelized core.
 
-- **Tiered Model Routing**: Intelligently routes tasks to different AI "Brains" (e.g., Groq 70B for premium IGs like AI/Cyber, Llama 8B for general tasks) to optimize precision vs. cost.
-- **Status-Aware Caching**: Uses a persistent metadata-rich hash database to **skip** previously verified or structured items, reducing redundant LLM calls by up to 90%.
-- **Circuit Breaker & Fallbacks**: Automatically detects provider outages (429/500) and switches to Together AI fallbacks with a 5-minute cooldown mechanism.
-- **Stealth & Resilience**: Mimics real browser behavior with randomized jitter and User-Agent rotation to bypass scraper protections.
-- **Zero-Code Scaling**: Manage everything (sources, model tiers, interest groups, result caps) purely through YAML configurations.
+- **Tiered Model Routing**: Intelligently routes tasks to different AI "Brains" (e.g., Groq 70B for premium IGs, Llama 8B for general tasks) via `models.yaml`.
+- **Status-Aware Caching**: Uses a dictionary-based hash database (`seen_hashes.json`) to skip previously verified or structured items, reducing redundant LLM calls.
+- **Circuit Breaker & Fallbacks**: Detects provider outages (429/500) and automatically shifts to **OpenRouter** fallbacks with configurable cooldown periods.
+- **Parallelized Processing**: Uses `asyncio` semaphores to manage high-throughput processing while strictly respecting Free-Tier rate limits (RPM/TPM).
+- **Stealth & Resilience**: Mimics real browser behavior with randomized jitter and User-Agent rotation.
 
 ---
 
 ## 📂 Project Structure
 
-```
+```text
 MuHive/
-├── src/                 # The Production Logic (Numbered by Flow)
-│   ├── stage_01_scraper.py
-│   ├── stage_02_filter.py 
-│   ├── stage_03_verifier.py
-│   ├── stage_04_structurer.py
-│   ├── stage_05_writer.py
-│   ├── utils.py         # Shared Helpers (Limiters, Circuit Breaker)
-│   └── schemas.py       # Pydantic Data Models
-├── config/              # ALL logic settings (No code changes needed!)
-│   ├── sources.yaml
-│   ├── groups.yaml
-│   ├── models.yaml      # Tiered Routing Config
-│   └── settings.yaml    # Quotas and Rate Limits
-├── state/               # Persistence (Hashes with Status, Cooldowns)
-├── output/              # Final processed data
 ├── main.py              # The Master Orchestrator
-└── requirements.txt     # Optimized dependencies
+├── config/              # ALL logic settings (No code changes needed!)
+│   ├── sources.yaml     # Scraper targets (RSS, Search, Sites)
+│   ├── groups.yaml      # Interest Group definitions & keywords
+│   ├── models.yaml      # Tiered Routing & LLM parameters
+│   └── settings.yaml    # Concurrency, Quotas, and Rate Limits
+├── src/
+│   ├── pipeline/        # The Modular Stages (01-05)
+│   ├── config.py        # Centralized YAML & .env loader
+│   ├── llm_client.py    # Multi-brain client with rate limiting
+│   ├── state_manager.py # Hashing & Persistence logic
+│   └── [utils...]       # Focused helper modules (HTTP, Retry, Circuit)
+├── tests/               # Pytest Unit Suite & Diagnostic Scripts
+├── state/               # Persistent data (Hashes, Circuit states)
+├── output/              # Final processed data (JSON, CSV)
+└── .env.example         # Environment template
 ```
 
 ---
@@ -42,24 +41,21 @@ MuHive/
 
 ### 1. Installation
 ```bash
+# Recommended: Create a virtual environment first
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configuration (API Keys)
-Create a file named **`.env`** in the root directory:
+### 2. Configuration
+Copy the template and fill in your API keys:
 ```bash
-TOGETHER_API_KEY=your_key
-GROQ_API_KEY=your_key
-TAVILY_API_KEY=your_key
-NEWSAPI_KEY=your_key
-APIFY_API_TOKEN=your_key
+cp .env.example .env
 ```
 
 ### 3. Execution
-Run for a specific Interest Group or the entire list:
-
 ```bash
-# Run for AI group only
+# Run for a specific Interest Group
 python main.py --ig AI
 
 # Run for all active groups
@@ -68,16 +64,17 @@ python main.py
 
 ---
 
-## 🧪 Maintenance & Ops
+## 🧪 Testing & Maintenance
 
-- **Status Reset**: To re-process previously seen items, run `rm state/seen_hashes.json`. Note that items marked as "structured" are skipped entirely unless the cache is cleared.
-- **Circuit State**: Check `state/circuit_state.json` to see which providers are currently in cooldown.
-- **Advanced Scraping**: Includes NewsAPI, Apify Social Social Monitoring, and specialized API scrapers for Unstop, Devfolio, etc.
+- **Unit Tests**: Run the full test suite with `pytest tests/`.
+- **Status Reset**: To re-process items, run `rm state/seen_hashes.json`.
+- **Circuit State**: Check `state/circuit_state.json` to monitor current provider cooldowns.
+- **Hardening**: All rate limits and concurrency settings are controlled via `config/settings.yaml`.
 
 ## 🏆 Key Technologies
 - **Python 3.10+**: Core logic and Asyncio.
-- **Groq & Together AI**: High-performance "Brains".
+- **Groq & OpenRouter**: Primary and fallback AI "Brains".
 - **Tavily**: Advanced search fallback.
-- **Pydantic**: Strict data validation.
+- **Pydantic**: Strict data validation & schema extraction.
 - **Trafilatura & BeautifulSoup**: Multi-layer content extraction.
-- **Httpx**: Modern, async HTTP client with user simulation.
+- **Tenacity**: Robust exponential backoff for network resilience.

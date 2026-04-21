@@ -1,7 +1,10 @@
 import asyncio
 from pydantic import BaseModel, Field
 from loguru import logger
-from .utils import make_llm_client, get_limiter, with_retry, load_config, update_hashes_status
+from ..llm_client import make_llm_client, get_limiter
+from ..retry import with_retry
+from ..config import load_config
+from ..state_manager import update_hashes_status
 
 class Verification(BaseModel):
     is_real: bool = Field(description="Is this a genuine tech opportunity?")
@@ -47,9 +50,9 @@ async def run_verifier(items):
     
     premium_used = 0
     premium_lock = asyncio.Lock()
-    semaphore = asyncio.Semaphore(2) # Safe for 30 RPM and 6K TPM limits
+    semaphore = asyncio.Semaphore(settings["verifier_concurrency"])
     
-    logger.info(f"Verifying {len(items)} items with tiered routing (Concurrency: 2)...")
+    logger.info(f"Verifying {len(items)} items with tiered routing (Concurrency: {settings['verifier_concurrency']})...")
     final = []
     
     async def process_item(item):
