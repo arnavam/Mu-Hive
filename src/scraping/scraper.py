@@ -18,6 +18,9 @@ from src.config.constants import (
     USER_AGENT, CONCURRENCY_LIMIT, SESSION_TIMEOUT,
     DEVFOLIO_API, DEVPOST_API, UNSTOP_API, HACKEREARTH_API,
 )
+from src.scraping.data_cleaner import clean_events
+from src.scraping.curate import curate, IG_KEYWORDS, MASTER_IGS
+from src.db.data_schemas import Event
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +83,11 @@ async def _devfolio_page(session, sem, offset: int) -> list[dict]:
                             cost     = "Free",
                             elig     = "Students",
                         ))
-                    except Exception:
+                    except Exception as e:
+                        print(f"[Error] {e}")
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Error] {e}")
     return events
 
 
@@ -140,10 +144,11 @@ async def _devpost_page(session, sem, page: int) -> list[dict]:
                             cost     = "Free",
                             elig     = "Students/Global",
                         ))
-                    except Exception:
+                    except Exception as e:
+                        print(f"[Error] {e}")
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Error] {e}")
     return events
 
 
@@ -196,10 +201,11 @@ async def _unstop_page(session, sem, page: int) -> list[dict]:
                             cost     = "Paid" if item.get("payment_type") == "paid" else "Free",
                             elig     = "Students/College",
                         ))
-                    except Exception:
+                    except Exception as e:
+                        print(f"[Error] {e}")
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Error] {e}")
     return events
 
 
@@ -250,10 +256,11 @@ async def _hackerearth_page(session, sem, page: int) -> list[dict]:
                             cost     = "Free",
                             elig     = "Open",
                         ))
-                    except Exception:
+                    except Exception as e:
+                        print(f"[Error] {e}")
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Error] {e}")
     return events
 
 
@@ -306,3 +313,64 @@ async def fetch_all_events() -> list[dict]:
         if isinstance(res, list):
             events.extend(res)
     return events
+
+
+async def run_scraper_pipeline() -> dict[str, list[Event]]:
+    """
+    Run the full scraper pipeline.
+    Fetches raw events, cleans them, curates them into IGs, and validates
+    them into Pydantic Event objects.
+    """
+    # 1. Fetch raw events
+    print("[Pipeline] Fetching raw events...")
+    raw_events = await fetch_all_events()
+    print(f"[Pipeline] Fetched {len(raw_events)} raw events.")
+
+    # 2. Clean events (returns primary and extended pools)
+    primary, extended = clean_events(raw_events)
+    print(f"[Pipeline] Cleaned events: {len(primary)} primary, {len(extended)} extended.")
+
+    # 3. Curate into groups based on IG keywords
+    grouped = curate(primary, extended, IG_KEYWORDS)
+    curated_count = sum(len(events) for events in grouped.values())
+    print(f"[Pipeline] Curated events: {curated_count}.")
+
+    # 4. Convert dictionaries to Pydantic Event objects
+    final_output = {}
+    seen_links = set()
+    total_valid = 0
+
+    for ig in MASTER_IGS:
+        final_output[ig] = []
+        for e in grouped.get(ig, []):
+            # Strict Event Validation
+            link = e.get("registrationLink")
+            if not link:
+                continue
+                
+            name = e.get("eventName", "")
+            if not name or name.strip() == "" or name.lower() in ["unknown", "tba", "n/a"]:
+                continue
+                
+            # Prevent duplicate events across IGs
+            if link in seen_links:
+                continue
+            seen_links.add(link)
+
+            try:
+                event_obj = Event(
+                    eventName=name.strip(),
+                    registrationLink=link.strip(),
+                    startDate=e.get("startDate", "TBA"),
+                    location=e.get("location"),
+                    platform=e.get("platform"),
+                    days_remaining=e.get("days_remaining", e.get("_days_remaining")),
+                )
+                final_output[ig].append(event_obj)
+                total_valid += 1
+            except Exception as exc:
+                print(f"[Pipeline Error] {exc}")
+                continue
+
+    print(f"[Pipeline] Curation complete. Validated {total_valid} Pydantic event objects.")
+    return final_output

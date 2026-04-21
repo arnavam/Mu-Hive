@@ -5,9 +5,6 @@ Event processing: dedup, classification, priority scoring,
 IG assignment, smart filling, and top-N selection.
 """
 
-import re
-from datetime import datetime
-
 # ──────────────────────────────────────────────────────────
 # 2A — MASTER_IGS (exact µLearn names, character-perfect)
 # ──────────────────────────────────────────────────────────
@@ -80,7 +77,7 @@ IG_KEYWORDS = {
     "fusionhack", "synapse sprint", "code innovation",
     "ai autonomous", "ai model", "ai powered", "ai driven",
     "ai x ", "ai-powered", "ai based", "using ai",
-    "machine intelligence", "ai hack"
+    "machine intelligence", "ai hack", "machine learning", " ml "
   ],
 
   "Generative AI": [
@@ -379,6 +376,32 @@ def assign_best_ig(event, IG_KEYWORDS):
     return best_ig
 
 
+def infer_event_type(event):
+  """Infer the event type from title/description using the required priority order."""
+  title = str(event.get("eventName", "")).lower()
+  desc = str(event.get("description", "")).lower()
+  tags = event.get("tags", [])
+  if isinstance(tags, list):
+    tags_text = " ".join(str(tag) for tag in tags).lower()
+  else:
+    tags_text = str(tags).lower()
+
+  text = f"{title} {desc} {tags_text}"
+
+  type_keywords = [
+    ("Hackathon", ["hackathon", "hack sprint", "hackfest", "hack day", "buildathon", "sprint"]),
+    ("Bootcamp", ["bootcamp", "boot camp"]),
+    ("Workshop", ["workshop", "hands-on", "masterclass"]),
+    ("Contest", ["contest", "competition", "challenge", "coding contest", "quiz"]),
+  ]
+
+  for event_type, keywords in type_keywords:
+    if any(keyword in text for keyword in keywords):
+      return event_type
+
+  return "Hackathon"
+
+
 def compute_score(event):
     score = 0
     days  = event.get("days_remaining", 999)
@@ -390,7 +413,7 @@ def compute_score(event):
     else:            score += 20   # extended pool events
 
     # Event type
-    etype = event.get("eventType", "").lower()
+    etype = str(event.get("_event_type", event.get("eventType", ""))).lower()
     if   "hackathon" in etype: score += 80
     elif "bootcamp"  in etype: score += 50
     elif "contest"   in etype: score += 30
@@ -440,128 +463,54 @@ SIBLING_IGS = {
 }
 
 def curate(primary_events, extended_events, IG_KEYWORDS):
-    # ──────────────────────────────────────────────────────────
-    # 2E — GLOBAL DEDUPLICATION (run before anything else)
-    # ──────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────
+  # 2E — GLOBAL DEDUPLICATION (run before anything else)
+  # ──────────────────────────────────────────────────────────
 
-    # Step 1: deduplicate full primary pool
-    unique_events = {}
-    for event in primary_events:
-        link = event.get("registrationLink", "").strip()
-        if not link:
-            continue
-        if link not in unique_events:
-            unique_events[link] = event
-    primary_events = list(unique_events.values())
+  unique_events = {}
+  for event in list(primary_events or []) + list(extended_events or []):
+    link = str(event.get("registrationLink", "")).strip()
+    if not link or link in unique_events:
+      continue
+    unique_events[link] = event
 
-    # Step 2: deduplicate extended pool, exclude primary links
-    primary_links = {e["registrationLink"] for e in primary_events}
-    extended_clean = []
-    for event in extended_events:
-        link = event.get("registrationLink", "").strip()
-        if link and link not in primary_links:
-            extended_clean.append(event)
-    extended_events = extended_clean
+  all_events = list(unique_events.values())
 
-    # ──────────────────────────────────────────────────────────
-    # 2F — SCORING
-    # ──────────────────────────────────────────────────────────
-    for e in primary_events:
-        e["score"] = compute_score(e)
-        e["_score"] = e["score"]
-    for e in extended_events:
-        e["score"] = compute_score(e)
-        e["_score"] = e["score"]
-        
-    for e in primary_events:
-        if "_event_type" not in e: e["_event_type"] = e.get("eventType", "Hackathon")
-    for e in extended_events:
-        if "_event_type" not in e: e["_event_type"] = e.get("eventType", "Hackathon")
+  # ──────────────────────────────────────────────────────────
+  # 2F — SINGLE-PASS SCORING AND IG ASSIGNMENT
+  # ──────────────────────────────────────────────────────────
 
-    # ──────────────────────────────────────────────────────────
-    # 2H — FOUR-PASS ALLOCATION (complete logic)
-    # ──────────────────────────────────────────────────────────
+  grouped = {ig: [] for ig in MASTER_IGS}
 
-    assigned = set()
-    grouped  = {ig: [] for ig in MASTER_IGS}
+  for event in all_events:
+    link = str(event.get("registrationLink", "")).strip()
+    if not link:
+      continue
 
-    # ── PASS 1: primary pool, strict keyword match ───────────
-    for event in primary_events:
-        link = event.get("registrationLink", "").strip()
-        if not link or link in assigned:
-            continue
-        ig = assign_best_ig(event, IG_KEYWORDS)
-        grouped[ig].append(event)
-        assigned.add(link)
+    event_type = infer_event_type(event)
+    event["eventType"] = event_type
+    event["_event_type"] = event_type
+    event["score"] = compute_score(event)
+    event["_score"] = event["score"]
+    if "days_remaining" in event and "_days_remaining" not in event:
+      event["_days_remaining"] = event.get("days_remaining")
+    if "days_remaining" in event and "_days_away" not in event:
+      event["_days_away"] = event.get("days_remaining")
 
-    # ── PASS 2: non-rare IGs under 3 → sibling borrow ───────
-    for ig in MASTER_IGS:
-        if ig in RARE_IGS:
-            continue   # handled separately
-        if len(grouped[ig]) >= 3:
-            continue
+    ig = assign_best_ig(event, IG_KEYWORDS)
+    grouped[ig].append(event)
 
-        for sibling in SIBLING_IGS.get(ig, []):
-            if len(grouped[ig]) >= 3:
-                break
-            candidates = [
-                e for e in grouped[sibling]
-                if e.get("registrationLink") not in
-                   {x.get("registrationLink") for x in grouped[ig]}
-            ]
-            for event in candidates:
-                if len(grouped[ig]) >= 3:
-                    break
-                grouped[ig].append(event)
+  # ──────────────────────────────────────────────────────────
+  # 2G — SORT AND CAP AT TOP 5 PER IG
+  # ──────────────────────────────────────────────────────────
 
-    # ── PASS 3: rare IGs → try extended pool first ──────────
-    for ig in RARE_IGS:
-        if len(grouped[ig]) >= 3:
-            continue
+  for ig in MASTER_IGS:
+    grouped[ig].sort(
+      key=lambda x: (
+        x.get("days_remaining", 999),
+        -x.get("score", 0),
+      )
+    )
+    grouped[ig] = grouped[ig][:5]
 
-        # try extended pool with strict keyword match
-        for event in extended_events:
-            if len(grouped[ig]) >= 5:
-                break
-            link = event.get("registrationLink", "").strip()
-            if not link or link in assigned:
-                continue
-            if assign_best_ig(event, IG_KEYWORDS) == ig:
-                grouped[ig].append(event)
-                assigned.add(link)
-
-        # still under 3 → borrow from siblings
-        if len(grouped[ig]) < 3:
-            for sibling in SIBLING_IGS.get(ig, []):
-                if len(grouped[ig]) >= 3:
-                    break
-                candidates = [
-                    e for e in grouped[sibling]
-                    if e.get("registrationLink") not in
-                       {x.get("registrationLink") for x in grouped[ig]}
-                ]
-                for event in candidates:
-                    if len(grouped[ig]) >= 3:
-                        break
-                    grouped[ig].append(event)
-
-        # still under 3 → General Tech fallback (any tech event)
-        if len(grouped[ig]) < 3:
-            for event in grouped["General Tech"]:
-                if len(grouped[ig]) >= 3:
-                    break
-                link = event.get("registrationLink", "")
-                if link not in {x.get("registrationLink") for x in grouped[ig]}:
-                    grouped[ig].append(event)
-
-    # ── PASS 4: sort + slice every IG ───────────────────────
-    for ig in MASTER_IGS:
-        grouped[ig].sort(
-            key=lambda x: (
-                x.get("days_remaining", 999),  # nearest first (PRIMARY)
-                -x.get("score", 0)             # score = tiebreaker only
-            )
-        )
-        grouped[ig] = grouped[ig][:5]          # top 5 max
-
-    return grouped
+  return grouped
