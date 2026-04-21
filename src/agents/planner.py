@@ -15,22 +15,21 @@ def plan_digests():
     db = Database()
     digests = {}
     
+    categories = ["News", "Hackathons", "Internships", "Events", "Workshops"]
+
     for ig in MVP_IGS:
-        # Fetch directly from MongoDB helper method
-        rows = db.get_top_opportunities_by_ig(ig, limit=5)
-        
         opportunities_by_cat = {}
-        for r in rows:
-            cat = r.get("category", "News")
-            if cat not in opportunities_by_cat:
+        for cat in categories:
+            rows = db.get_top_opportunities_by_ig_and_category(ig, cat, limit=10)
+            if rows:
                 opportunities_by_cat[cat] = []
-                
-            opportunities_by_cat[cat].append({
-                "title": r.get("title", "No Title"),
-                "summary": r.get("summary", ""),
-                "link": r.get("link", ""),
-                "score": r.get("quality_score", 0)
-            })
+                for r in rows:
+                    opportunities_by_cat[cat].append({
+                        "title": r.get("title", "No Title"),
+                        "summary": r.get("summary", ""),
+                        "link": r.get("link", ""),
+                        "score": r.get("quality_score", 0)
+                    })
         
         if opportunities_by_cat:
             digests[ig] = opportunities_by_cat

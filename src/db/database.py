@@ -109,7 +109,7 @@ class Database:
             "is_processed": False,
             "quality_score": None,
             "status": {"$ne": "not processed"}
-        }).limit(limit))
+        }).sort("created_at", -1).limit(limit))
 
     def update_intelligence(self, doc_id, final_score, ig_tags):
         result = self.opportunities.update_one(
@@ -121,6 +121,15 @@ class Database:
             }}
         )
         return result.modified_count > 0
+
+    def get_top_opportunities_by_ig_and_category(self, ig, category, limit=10):
+        return list(self.opportunities.find(
+            {
+                "ig_tags": ig,
+                "category": {"$regex": f"^{category}$", "$options": "i"},
+                "quality_score": {"$gte": 5}
+            }
+        ).sort("quality_score", -1).limit(limit))
 
     def get_top_opportunities_by_ig(self, ig, limit=5):
         return list(self.opportunities.find(

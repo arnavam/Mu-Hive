@@ -13,6 +13,7 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import requests
 from duckduckgo_search import DDGS
+import calendar
 
 from src.db.database import Database
 from src.config.sources import ALL_RSS_FEEDS
@@ -50,6 +51,12 @@ def run_rss_scout(db: Database):
                 if not feed.entries:
                     continue
                 for entry in feed.entries[:5]:
+                    pub_parsed = entry.get('published_parsed') or entry.get('updated_parsed')
+                    if pub_parsed:
+                        pub_time = calendar.timegm(pub_parsed)
+                        if time.time() - pub_time > 86400:
+                            continue
+
                     title = entry.get("title", "").strip()
                     link = entry.get("link", "").strip()
                     summary_raw = entry.get("summary", "")
@@ -89,7 +96,7 @@ def run_search_agent(db: Database):
             query = f"{keyword} {category}"
             try:
                 try:
-                    results = list(ddgs.text(query, max_results=3, safesearch='moderate', timelimit='y'))
+                    results = list(ddgs.text(query, max_results=3, safesearch='moderate', timelimit='d'))
                     source = 'DuckDuckGo'
                 except Exception:
                     results = get_tavily_results(query, 3)
