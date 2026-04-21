@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from pathlib import Path
 
 from ddgs import DDGS
@@ -10,22 +13,22 @@ from src.db.database import Database
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 def run_search_agent(keywords, categories, max_result=5):
-    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
+    logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
     db = Database()
 
-    print("--------- Keyword Expansion -------------")
+    logger.info("--------- Keyword Expansion -------------")
     search_queries = []
     for keyword in keywords:
         for category in categories:
             query = f"{keyword} {category}"
             search_queries.append(query)
-            print(f"- {query}")
+            logger.info(f"- {query}")
 
-    print("\n--- Searching DuckDuckGo ---")
+    logger.info("\n--- Searching DuckDuckGo ---")
      
     ddgs = DDGS()
     for query in search_queries:
-        print(f"\nResults for '{query}':")
+        logger.info(f"\nResults for '{query}':")
         try:
             results = []
             source_engine = 'DuckDuckGo'
@@ -35,16 +38,16 @@ def run_search_agent(keywords, categories, max_result=5):
                 # Setting safesearch='moderate' and timelimit='y' helps filter out obscure/spam domains.
                 results = list(ddgs.text(query, max_results=max_result, safesearch='moderate', timelimit='y'))
             except Exception as ddg_error:
-                print(f"   [!] DuckDuckGo failed ({ddg_error}). Falling back to Tavily...")
+                logger.info(f"   [!] DuckDuckGo failed ({ddg_error}). Falling back to Tavily...")
                 source_engine = 'Tavily'
                 time.sleep(2)  # Avoid fast consecutive requests
                 try:
                     results = get_tavily_results(query, max_result)
                 except Exception as t_error:
-                    print(f"   [!] Tavily Search also failed: {t_error}")
+                    logger.info(f"   [!] Tavily Search also failed: {t_error}")
 
             if not results:
-                print("   No results found.")
+                logger.info("   No results found.")
             else:
                 SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com", "youtube.com", "facebook.com", "instagram.com",
     "tiktok.com"]
@@ -56,16 +59,16 @@ def run_search_agent(keywords, categories, max_result=5):
                     is_spam = any(spam in link for spam in SPAM_DOMAINS)
                     is_low_quality = any(link.endswith(tld) or (tld + "/") in link for tld in [".xyz", ".info", ".top", ".cc", ".biz"])
                     if is_spam or is_low_quality:
-                        print(f"{i}. [Skip] Filtered low-quality or spam domain: {link}")
+                        logger.info(f"{i}. [Skip] Filtered low-quality or spam domain: {link}")
                         continue
 
-                    print(f"{i}. [{source_engine}] {title}")
-                    print(f"   Link: {link}")
+                    logger.info(f"{i}. [{source_engine}] {title}")
+                    logger.info(f"   Link: {link}")
                     
                     if not db.link_exists(link, query):
                         db.insert_event(title, link, query, source_engine, 'not processed')
         except Exception as e:
-            print(f"   Error searching for '{query}': {e}")
+            logger.info(f"   Error searching for '{query}': {e}")
         
         # Small delay to avoid hitting rate limits too quickly
         time.sleep(1)
@@ -77,8 +80,8 @@ def get_tavily_results(query, max_results=5):
     """Fetch results from Tavily Search API (fallback when DuckDuckGo fails)."""
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key or api_key == "your_tavily_api_key_here":
-        print("   [!] Tavily API key not configured in .env")
-        print("   [!] Get your API key at https://app.tavily.com and add it to .env")
+        logger.info("   [!] Tavily API key not configured in .env")
+        logger.info("   [!] Get your API key at https://app.tavily.com and add it to .env")
         return []
     
     url = "https://api.tavily.com/search"
@@ -107,8 +110,8 @@ def get_tavily_results(query, max_results=5):
 
 
 def main():
-    print("Search agent started. Running search...")
-    print("Press Ctrl+C to exit.")
+    logger.info("Search agent started. Running search...")
+    logger.info("Press Ctrl+C to exit.")
     
     keywords = ["Artificial intelligence", "web development"]
     categories = ["internships", "Current news", "workshops", "events", "hackathons"]

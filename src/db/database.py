@@ -1,9 +1,12 @@
-<<<<<<< HEAD
+import logging
+logger = logging.getLogger(__name__)
+
 import datetime
+from bson.objectid import ObjectId
 try:
     from pymongo import MongoClient
 except ImportError:
-    print("pymongo is not installed. Please run `pip install pymongo`.")
+    logger.info("pymongo is not installed. Please run `pip install pymongo`.")
     raise
 
 class Database:
@@ -32,12 +35,12 @@ class Database:
             "timestamp": datetime.datetime.utcnow()
         }
         try:
-            self.events.insert_one(event_doc)
-            return True
+            result = self.events.insert_one(event_doc)
+            return result.inserted_id
         except Exception as e:
             # Catch DuplicateKeyError or other errors
-            print(f"Error inserting into db: {e}")
-            return False
+            logger.info(f"Error inserting into db: {e}")
+            return None
 
     def find_pending_scrape(self, limit=50):
         """Events inserted by the search agent with status 'not processed'."""
@@ -79,44 +82,3 @@ class Database:
     def close(self):
         """Close the MongoDB connection."""
         self.client.close()
-=======
-import sqlite3
-import os
-import logging
-
-logger = logging.getLogger(__name__)
-
-# Resolve the absolute path to the data directory from the current file
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "data", "mu_hive.db"))
-
-def get_connection():
-    """Returns a new SQLite connection to the pipeline database."""
-    return sqlite3.connect(DB_PATH)
-
-def init_db():
-    """Creates the opportunities table if it doesn't already exist."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS opportunities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            summary TEXT NOT NULL,
-            link TEXT UNIQUE NOT NULL,
-            ig_tags TEXT,
-            quality_score INTEGER,
-            is_processed BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    logger.info(f"Database initialized at: {DB_PATH}")
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    init_db()
->>>>>>> Zaim
