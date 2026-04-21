@@ -1,0 +1,41 @@
+pipeline:
+  max_concurrent_scrapers: 3
+  llm_rpm: 28
+  search_rpm: 5
+  min_verified_score: 0.5
+  seen_hashes_file: state/seen_hashes.json
+  circuit_state_file: state/circuit_state.json
+  retry_backoff_seconds: [1, 2, 4]
+  max_retries: 3
+  
+  # High Efficiency Routing
+  max_premium_items_per_run: 50
+  
+  ig_routing:
+    AI:
+      verifier: "premium"
+      structurer: "premium"
+    Cybersecurity:
+      verifier: "premium"
+      structurer: "cheap"
+    default:
+      verifier: "cheap"
+      structurer: "cheap"
+
+  rate_limits:
+    groq:
+      max_rpm: 30
+    openrouter:
+      max_rpm: 10
+
+  search:
+    primary: "duckduckgo"
+    fallback: "tavily"
+
+  per_ig_limits:
+    AI:
+      max_verified: 20
+      max_structured: 20
+    default:
+      max_verified: 10
+      max_structured: 10

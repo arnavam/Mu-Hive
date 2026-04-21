@@ -1,0 +1,115 @@
+global:
+  rss:
+    - url: https://hnrss.org/frontpage
+      label: Hacker News
+    - url: https://www.artificialintelligence-news.com/feed/
+      label: AI News
+    - url: https://www.wired.com/feed/category/business/artificial-intelligence/rss
+      label: Wired AI
+    - url: https://www.theverge.com/rss/index.xml
+      label: The Verge
+    - url: https://feeds.arstechnica.com/arstechnica/technology-lab
+      label: Ars Technica Lab
+    - url: https://techcrunch.com/tag/artificial-intelligence/feed/
+      label: TechCrunch AI
+    - url: https://www.zdnet.com/topic/artificial-intelligence/rss.xml
+      label: ZDNet AI
+  search:
+    - query: hackathon open registration 2026
+      label: General hackathons
+    - query: tech internship students 2026
+      label: General internships
+
+interest_groups:
+
+  AI:
+    rss:
+      # Research & Academic
+      - url: https://arxiv.org/rss/cs.AI
+        label: ArXiv AI
+      - url: https://arxiv.org/rss/cs.LG
+        label: ArXiv ML
+      - url: https://news.mit.edu/rss/topic/artificial-intelligence
+        label: MIT AI News
+      - url: https://bair.berkeley.edu/blog/feed.xml
+        label: Berkeley AI Research
+      - url: https://deepmind.google/blog/rss.xml
+        label: DeepMind Blog
+      - url: https://openai.com/blog/rss.xml
+        label: OpenAI Blog
+      # Corporate Blogs
+      - url: https://huggingface.co/blog/feed.xml
+        label: Hugging Face Blog
+      - url: https://www.anthropic.com/news/rss
+        label: Anthropic News
+      - url: https://stability.ai/blog/rss
+        label: Stability AI Blog
+      - url: https://blogs.nvidia.com/blog/category/deep-learning/feed/
+        label: NVIDIA AI Blog
+      # Aggregated / Community
+      - url: https://news.google.com/rss/search?q=artificial+intelligence
+        label: Google News AI
+      - url: https://www.reddit.com/r/artificial/.rss
+        label: r/artificial
+      - url: https://www.reddit.com/r/MachineLearning/.rss
+        label: r/MachineLearning
+      # Nitter (Social Media Personalities)
+      - url: https://nitter.net/karpathy/rss
+        label: Andrej Karpathy (X)
+      - url: https://nitter.net/ylecun/rss
+        label: Yann LeCun (X)
+      - url: https://nitter.net/sama/rss
+        label: Sam Altman (X)
+    search:
+      - query: AI hackathon 2026 students
+        label: AI hackathons
+      - query: machine learning internship 2026
+        label: ML internships
+      - query: Artificial intelligence workshops 2026
+        label: AI workshops
+      - query: Artificial intelligence events 2026
+        label: AI events
+    sites:
+      - url: https://lablab.ai/event
+        label: LabLab AI events
+
+  Cybersecurity:
+    rss:
+      - url: https://feeds.feedburner.com/TheHackersNews
+        label: Hacker News Security
+    search:
+      - query: CTF competition 2026 open registration
+        label: CTF events
+      - query: cybersecurity internship 2026
+        label: Infosec internships
+    sites:
+      - url: https://ctftime.org/event/list/upcoming
+        label: CTFtime
+
+  WebDev:
+    rss:
+      - url: https://css-tricks.com/feed/
+        label: CSS Tricks
+    search:
+      - query: web development hackathon 2026
+        label: WebDev hackathons
+      - query: web development internships 2026
+        label: WebDev internships
+      - query: web development workshops 2026
+        label: WebDev workshops
+
+  DataScience:
+    search:
+      - query: kaggle competition 2026
+        label: Kaggle
+    sites:
+      - url: https://www.kaggle.com/competitions
+        label: Kaggle competitions
+
+  OpenSource:
+    rss:
+      - url: https://github.blog/feed/
+        label: GitHub blog
+    search:
+      - query: Google Summer of Code 2026
+        label: GSoC

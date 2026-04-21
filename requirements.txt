@@ -1,16 +1,16 @@
-# 🧠 AI & Orchestration
-langchain
-langchain-core
-langchain-groq
-langchain-google-genai
-langchain-openai
-
-# 🔍 Search & Verification
-langchain-community
-duckduckgo-search
+beautifulsoup4
+lxml
+feedparser
+trafilatura
+httpx
 ddgs
-
-# 🛠️ Data & Infrastructure
+openai
 pydantic
+aiolimiter
+tenacity
 pyyaml
+loguru
 python-dotenv
+brotli
+newsapi-python
+apify-client

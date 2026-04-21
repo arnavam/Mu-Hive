@@ -1,0 +1,38 @@
+providers:
+  groq:
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+    rpm: 30
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    rpm: 10
+
+roles:
+  verifier:
+    cheap:
+      provider: "groq"
+      model: "llama-3.1-8b-instant"
+      temperature: 0.1
+    premium:
+      provider: "groq"
+      model: "llama-3.3-70b-versatile"
+      temperature: 0.1
+    fallback:
+      provider: "openrouter"
+      model: "openai/gpt-oss-120b:free"
+      temperature: 0.1
+
+  structurer:
+    cheap:
+      provider: "groq"
+      model: "llama-3.1-8b-instant"
+      temperature: 0.1
+    premium:
+      provider: "groq"
+      model: "llama-3.3-70b-versatile"
+      temperature: 0.1
+    fallback:
+      provider: "openrouter"
+      model: "openai/gpt-oss-120b:free"
+      temperature: 0.1
