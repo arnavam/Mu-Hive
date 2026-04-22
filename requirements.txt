@@ -1,3 +1,12 @@
+aiohttp
+aiofiles
+pytest
+pytest-asyncio
+pymongo
+python-dotenv
+certifi
+dnspython
+
 psycopg2-binary
 python-dotenv
 firecrawl-py
