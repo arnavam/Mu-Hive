@@ -5,6 +5,8 @@ Event processing: dedup, classification, priority scoring,
 IG assignment, smart filling, and top-N selection.
 """
 
+import re
+
 # ──────────────────────────────────────────────────────────
 # 2A — MASTER_IGS (exact µLearn names, character-perfect)
 # ──────────────────────────────────────────────────────────
@@ -62,14 +64,14 @@ IG_KEYWORDS = {
   "Web Development": [
     "web", "frontend", "backend", "fullstack", "full stack",
     "react", "node", "django", "flask", "html", "css",
-    "javascript", "php", "api", "rest", "graphql",
+    "javascript", "typescript", "nextjs", "vue", "php", "api", "rest", "graphql",
     "weboreel", "web auction", "web app", "website",
     "web dev", "browser", "web application", "web3 frontend",
-    "http", "web development", "web hack"
+    "http", "web development", "frontend developer", "backend developer"
   ],
 
   "Ai": [
-    "artificial intelligence", " ai ", "ai hackathon",
+    "artificial intelligence", " ai ",
     "ai challenge", "neural network", "deep learning",
     "computer vision", "ai agent", "autonomous ai",
     "ai platform", "intelligent system", "ai solution",
@@ -77,7 +79,8 @@ IG_KEYWORDS = {
     "fusionhack", "synapse sprint", "code innovation",
     "ai autonomous", "ai model", "ai powered", "ai driven",
     "ai x ", "ai-powered", "ai based", "using ai",
-    "machine intelligence", "ai hack", "machine learning", " ml "
+    "machine intelligence", "machine learning", " ml ",
+    "nlp", "transformer", "inference", "model fine tuning", "turing"
   ],
 
   "Generative AI": [
@@ -96,7 +99,7 @@ IG_KEYWORDS = {
     "neurologic", "nlp datathon", "data contest",
     "data driven", "big data", "etl", "data pipeline",
     "data engineer", "data analyst", "data science contest",
-    "nlp", "natural language processing"
+    "nlp", "natural language processing", "scikit learn", "feature engineering"
   ],
 
   "Data Analytics": [
@@ -124,8 +127,9 @@ IG_KEYWORDS = {
     "ethical hacking", "cybersecurity", "cyberwar",
     "infosec", "hacking", "exploit", "forensics",
     "malware", "network security", "penetration",
-    "scbc", "vikingshacks", "ecohack", "secure bharat",
-    "cyber nexus", "information security", "devsecops"
+    "scbc", "vikingshacks", "secure bharat",
+    "cyber nexus", "information security", "devsecops", "owasp", "siem",
+    "threat intelligence", "incident response", "soc analyst"
   ],
 
   "Blockchain": [
@@ -133,8 +137,8 @@ IG_KEYWORDS = {
     "defi", "solidity", "crypto", "ethereum", "polygon",
     "aetherax", "decentralized", "token", "wallet",
     "dao", "dapp", "bitcoin", "codeblue", "box box",
-    "web 3", "blockzen", "crypto finance", "chain hack",
-    "consensus", "distributed ledger"
+    "web 3", "blockzen", "crypto finance", "fintech", "finance", "banking", "payments", "digital wallet",
+    "consensus", "distributed ledger", "evm", "onchain", "layer 2"
   ],
 
   "Game Dev": [
@@ -178,9 +182,9 @@ IG_KEYWORDS = {
     "android", "ios", "flutter", "react native",
     "mobile app", "swift", "kotlin", "mobile development",
     "mobile hack", "app development", "cross platform",
-    "mobile ui", "nira hackathon", "grizzly hacks",
+    "mobile ui", "grizzly hacks",
     "zervehack", "mobile application", "mobile challenge",
-    "app hack", "mobile first"
+    "mobile first"
   ],
 
   "Devops": [
@@ -189,14 +193,14 @@ IG_KEYWORDS = {
     "sre", "platform engineering", "helm", "ansible",
     "infrastructure as code", "site reliability",
     "build pipeline", "containerization", "kubernetes",
-    "cloud infra", "ibm hackathon", "developer week",
-    "devops challenge", "cloud ops"
+    "cloud infra", "cloud", "aws", "azure", "gcp", "developer week",
+    "devops challenge", "cloud ops", "terraform", "observability", "prometheus", "grafana"
   ],
 
   "Product Management": [
     "product management", "product manager", "product strategy",
     "product thinking", "product teardown", "ai product",
-    "product hack", "roadmap", "product sprint",
+    "roadmap", "product sprint",
     "product challenge", "pm challenge", "vibeflow",
     "kindly labs", "spec driven", "product build",
     "product design challenge", "product innovation"
@@ -204,11 +208,11 @@ IG_KEYWORDS = {
 
   "Project Management": [
     "project management", "project manager", "pmp",
-    "agile", "scrum", "sprint planning", "project hack",
+    "agile", "scrum", "sprint planning",
     "project challenge", "delivery management",
     "waterfall", "project strategy", "project lead",
     "project solution", "project innovation",
-    "project planning", "project execution"
+    "project planning", "project execution", "project dev", "project development"
   ],
 
   "Entrepreneurship": [
@@ -216,9 +220,12 @@ IG_KEYWORDS = {
     "business plan", "entrepreneurship", "innovation challenge",
     "katz school", "ideation", "buildathon", "founder",
     "incubation", "social enterprise", "mvp challenge",
-    "luma hackathon", "smart horizon", "business hack",
+    "smart horizon",
     "entrepreneurship simulation", "build your business",
-    "startup weekend", "innovation sprint"
+    "startup weekend", "innovation sprint",
+    "social good", "sustainable innovation", "impact startup", "climate startup",
+    "startup funding", "seed", "pitch deck", "business model"
+    , "women in tech", "shebuilds", "she builds"
   ],
 
   "Digital Marketing": [
@@ -243,10 +250,10 @@ IG_KEYWORDS = {
   "Human Resources": [
     "human resources", " hr ", "people management",
     "talent", "recruitment", "hiring challenge",
-    "workforce", "hr hackathon", "hr challenge",
-    "people ops", "employee", "hrtech", "hr tech",
+    "workforce", "hr challenge",
+    "people ops", "employee", "hrtech",
     "talent management", "people analytics",
-    "hr innovation", "workforce tech"
+    "hr innovation"
   ],
 
   "Strategic Leadership": [
@@ -255,7 +262,9 @@ IG_KEYWORDS = {
     "business challenge", "consulting", "business model",
     "strategic thinking", "decision making", "corporate hack",
     "business leadership", "management challenge",
-    "executive", "strategic innovation"
+    "executive", "strategic innovation",
+    "social impact", "sustainability", "climate leadership", "community impact",
+    "policy", "sdg", "impact leadership"
   ],
 
   "Civil": [
@@ -264,7 +273,8 @@ IG_KEYWORDS = {
     "civil engineering", "bridge design", "building design",
     "urban infrastructure", "environmental engineering",
     "civil hackathon", "architecture engineering",
-    "hydrohackathon", "water", "sanitation"
+    "hydrohackathon", "water", "sanitation",
+    "eco", "sustainable", "climate", "environment", "green", "social good"
   ],
 
   "Quality Assurance": [
@@ -286,7 +296,7 @@ IG_KEYWORDS = {
 
   "MuV": [
     "media", "visual arts", "short film", "reel",
-    "storytelling event", "content creation",
+    "storytelling", "content creation",
     "acting", "performance", "stage", "theatre",
     "filmmaking", "podcast", "photography challenge",
     "vlog", "screenplay", "documentary",
@@ -298,22 +308,21 @@ IG_KEYWORDS = {
     "space", "satellite", "nasa", "aerospace", "orbital",
     "rocketry", "astrophysics", "spacetech", "cosmos",
     "space exploration", "lunar", "mars", "telescope",
-    "space hackathon", "isro", "space challenge",
-    "space tech", "space innovation", "space mission"
+    "space challenge", "isro", "space innovation", "space mission"
   ],
 
   "Quantum Computing": [
     "quantum", "qubit", "qiskit", "quantum circuit",
     "quantum ml", "quantum computing", "quantum hackathon",
     "superposition", "entanglement", "quantum algorithm",
-    "quantum challenge", "quantum tech", "quantum innovation",
+    "quantum challenge", "quantum innovation",
     "quantum software", "quantum physics"
   ],
 
   "Creative Design": [
     "creative design", "illustration", "visual design",
     "branding", "graphic design", "motion design",
-    "photography", "design challenge", "creative hack",
+    "photography", "design challenge",
     "typography", "poster design", "logo design",
     "art challenge", "creative challenge", "design sprint",
     "visual communication", "design competition"
@@ -322,7 +331,7 @@ IG_KEYWORDS = {
   "Beckn": [
     "beckn", "ondc", "open network", "interoperability",
     "decentralized commerce", "beckn protocol",
-    "open commerce", "network protocol", "beckn hack",
+    "open commerce", "network protocol",
     "beckn challenge", "open protocol", "beckn build"
   ],
 
@@ -333,47 +342,106 @@ IG_KEYWORDS = {
 # 2D — assign_best_ig() WITH MuV STRICT GUARD
 # ──────────────────────────────────────────────────────────
 
+def _normalized_matching_text(event):
+  """Build normalized multi-field text for IG matching."""
+  text = (
+    f"{event.get('eventName', '')} "
+    f"{event.get('description', '')} "
+    f"{event.get('platform', '')}"
+  ).lower()
+  return re.sub(r"[^a-z0-9+\s]", " ", text)
+
+
+def _keyword_hit(text: str, keyword: str) -> bool:
+  k = keyword.strip().lower()
+  if not k:
+    return False
+
+  # Multi-word terms are checked as phrase matches; single-word terms as word boundaries.
+  if " " in k or "+" in k:
+    return k in text
+
+  prefix_terms = {"eco"}
+  if k in prefix_terms:
+    return k in text
+
+  return re.search(rf"\b{re.escape(k)}\b", text) is not None
+
+
+def _compute_ig_scores(event, IG_KEYWORDS):
+  text = _normalized_matching_text(event)
+  scores = {}
+
+  negative_signals = {
+    "Cyber Security": {
+      "terms": ["eco", "sustainable", "sustainability", "climate", "environment", "green", "social good"],
+      "penalty": 2,
+    }
+  }
+
+  for ig, keywords in IG_KEYWORDS.items():
+    if ig == "General Tech":
+      continue
+    positive_score = sum(1 for keyword in keywords if _keyword_hit(text, keyword))
+    penalty_conf = negative_signals.get(ig)
+    if penalty_conf:
+      negatives = penalty_conf["terms"]
+      penalty = penalty_conf["penalty"] * sum(1 for term in negatives if _keyword_hit(text, term))
+      positive_score = max(0, positive_score - penalty)
+    scores[ig] = positive_score
+
+  return text, scores
+
+
+def _top_two_scores(scores: dict[str, int]) -> tuple[int, int]:
+  ordered = sorted(scores.values(), reverse=True)
+  top = ordered[0] if ordered else 0
+  second = ordered[1] if len(ordered) > 1 else 0
+  return top, second
+
+
+def _is_confident_assignment(best_score: int, second_score: int) -> bool:
+  """Keep assignments high precision: clear winner or clearly strong signal."""
+  if best_score <= 0:
+    return False
+  if best_score >= 3:
+    return True
+  return (best_score - second_score) >= 1
+
+
 def assign_best_ig(event, IG_KEYWORDS):
-    title = event.get("eventName", "").lower().strip()
-    desc  = event.get("description", "").lower().strip()
-    tags  = event.get("tags", "")
+  text, scores = _compute_ig_scores(event, IG_KEYWORDS)
 
-    if isinstance(tags, list):
-        tags = " ".join(tags).lower()
-    elif isinstance(tags, str):
-        tags = tags.lower()
-    else:
-        tags = ""
+  best_ig = None
+  best_score = 0
+  for ig, score in scores.items():
+    if score > best_score:
+      best_score = score
+      best_ig = ig
 
-    # Title 3x weight — most reliable classification signal
-    text = (title + " ") * 3 + desc + " " + tags
+  # ── MuV STRICT GUARD ──────────────────────────────────
+  # MuV = creative/media IG. Never assign tech events.
+  if best_ig == "MuV":
+    muv_required = [
+      "media", "film", "story", "content creator",
+      "creative", "video", "acting", "performance",
+      "reel", "animation", "podcast", "photography",
+      "stage", "theatre", "screenplay", "vlog",
+      "filmmaking", "short film", "documentary"
+    ]
+    if not any(word in text for word in muv_required):
+      best_ig = "General Tech"
+      best_score = 0
+  # ──────────────────────────────────────────────────────
 
-    best_ig    = "General Tech"
-    best_score = 0
+  top_score, second_score = _top_two_scores(scores)
+  if not _is_confident_assignment(top_score, second_score):
+    return "General Tech", 0, scores
 
-    for ig, keywords in IG_KEYWORDS.items():
-        if ig == "General Tech":
-            continue
-        score = sum(1 for k in keywords if k in text)
-        if score > best_score:
-            best_score = score
-            best_ig    = ig
+  if best_score <= 0:
+    return "General Tech", 0, scores
 
-    # ── MuV STRICT GUARD ──────────────────────────────────
-    # MuV = creative/media IG. Never assign tech events.
-    if best_ig == "MuV":
-        MUV_REQUIRED = [
-            "media", "film", "story", "content creator",
-            "creative", "video", "acting", "performance",
-            "reel", "animation", "podcast", "photography",
-            "stage", "theatre", "screenplay", "vlog",
-            "filmmaking", "short film", "documentary"
-        ]
-        if not any(w in title for w in MUV_REQUIRED):
-            best_ig = "General Tech"
-    # ──────────────────────────────────────────────────────
-
-    return best_ig
+  return best_ig, best_score, scores
 
 
 def infer_event_type(event):
@@ -429,7 +497,7 @@ def compute_score(event):
 
     return score
 
-SIBLING_IGS = {
+RELATED_IGS = {
     "Ai":                                    ["Generative AI", "Data Science", "Web Development"],
     "Generative AI":                         ["Ai", "Data Science", "Creative Design"],
     "Data Science":                          ["Data Analytics", "Ai", "Data Structures and Algorithm"],
@@ -497,17 +565,95 @@ def curate(primary_events, extended_events, IG_KEYWORDS):
     if "days_remaining" in event and "_days_away" not in event:
       event["_days_away"] = event.get("days_remaining")
 
-    ig = assign_best_ig(event, IG_KEYWORDS)
+    ig, match_score, ig_scores = assign_best_ig(event, IG_KEYWORDS)
+
+    event["_best_ig"] = ig
+    event["_match_score"] = match_score
+    event["_ig_scores"] = ig_scores
     grouped[ig].append(event)
 
   # ──────────────────────────────────────────────────────────
-  # 2G — SORT AND CAP AT TOP 5 PER IG
+  # 2G — CONTROLLED RELATED-IG FALLBACK FOR EMPTY GROUPS
+  # ──────────────────────────────────────────────────────────
+
+  for target_ig in MASTER_IGS:
+    if grouped[target_ig] or target_ig == "General Tech":
+      continue
+
+    for source_ig in RELATED_IGS.get(target_ig, []):
+      source_events = grouped.get(source_ig, [])
+      if len(source_events) <= 1:
+        continue
+
+      candidates = sorted(
+        source_events,
+        key=lambda event: (
+          -event.get("_ig_scores", {}).get(target_ig, 0),
+          event.get("days_remaining", 999),
+          -event.get("score", 0),
+        ),
+      )
+
+      moved = False
+      for candidate in candidates:
+        target_score = candidate.get("_ig_scores", {}).get(target_ig, 0)
+        candidate_scores = candidate.get("_ig_scores", {})
+        candidate_best = max(candidate_scores.values()) if candidate_scores else 0
+        if target_score <= 0:
+          continue
+        if target_score < candidate_best:
+          continue
+
+        grouped[source_ig].remove(candidate)
+        candidate["_best_ig"] = target_ig
+        candidate["_match_score"] = target_score
+        grouped[target_ig].append(candidate)
+        moved = True
+        break
+
+      if moved:
+        break
+
+  # Secondary fallback: for still-empty IGs, borrow the closest relevant event globally.
+  for target_ig in MASTER_IGS:
+    if grouped[target_ig] or target_ig == "General Tech":
+      continue
+
+    global_candidates = []
+    for source_ig, source_events in grouped.items():
+      if source_ig != "General Tech":
+        continue
+      for event in source_events:
+        target_score = event.get("_ig_scores", {}).get(target_ig, 0)
+        candidate_scores = event.get("_ig_scores", {})
+        candidate_best = max(candidate_scores.values()) if candidate_scores else 0
+        if target_score > 0 and target_score == candidate_best:
+          global_candidates.append((source_ig, event, target_score))
+
+    if not global_candidates:
+      continue
+
+    source_ig, candidate, _ = sorted(
+      global_candidates,
+      key=lambda item: (
+        -item[2],
+        item[1].get("days_remaining", 999),
+        -item[1].get("score", 0),
+      ),
+    )[0]
+
+    grouped[source_ig].remove(candidate)
+    grouped[target_ig].append(candidate)
+
+  # ──────────────────────────────────────────────────────────
+  # 2H — SORT AND CAP AT TOP 5 PER IG
   # ──────────────────────────────────────────────────────────
 
   for ig in MASTER_IGS:
     grouped[ig].sort(
       key=lambda x: (
         x.get("days_remaining", 999),
+        -x.get("_match_score", 0),
         -x.get("score", 0),
       )
     )
