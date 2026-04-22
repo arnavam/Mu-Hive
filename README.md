@@ -1,6 +1,6 @@
-# 🐝 MuHive v2: Modular Agentic Discovery Engine
+# 🐝 MuHive v1: Modular Agentic Discovery Engine
 
-MuHive v2 is a state-of-the-art, modular AI pipeline designed to autonomously discover, verify, and structure technical opportunities for student Interest Groups. It uses a multi-agent architecture to ensure high data quality and system resilience.
+MuHive v1 is a state-of-the-art, modular AI pipeline designed to autonomously discover, verify, and structure technical opportunities for student Interest Groups. It uses a multi-agent architecture to ensure high data quality and system resilience.
 
 ## 🚀 Key Features
 
@@ -9,7 +9,6 @@ MuHive v2 is a state-of-the-art, modular AI pipeline designed to autonomously di
 - **Consolidated Configuration**: All system settings, sources, and interest groups are managed through a single `config.yaml`.
 - **Status-Aware Caching**: Uses a hash database (`data/seen_hashes.json`) to deduplicate and track processing states.
 - **Circuit Breaker & Fallbacks**: Automatically detects provider outages and shifts to fallbacks with configurable cooldowns.
-- **Comprehensive Testing**: Built-in test suite covering every core component.
 
 ---
 
@@ -29,8 +28,6 @@ MuHive/
 │   ├── orchestrator.py  # Central coordinator for the pipeline
 │   ├── agent_config.py  # Agent-specific routing and personas
 │   └── [utils...]       # Focused helpers (HTTP, Retry, Circuit Breaker)
-├── tests/               # Full Pytest suite (Agents, Scrapers, Integration)
-├── scripts/             # Diagnostic and one-off developer scripts
 └── .env.example         # Template for required API keys
 ```
 
@@ -62,13 +59,6 @@ python main.py
 ```
 
 ---
-
-## 🧪 Testing
-The project includes a comprehensive test suite covering all features.
-```bash
-# Run all tests
-.venv/bin/pytest tests/
-```
 
 ## 🏆 Key Technologies
 - **Python 3.12+**: Core logic and Asyncio.
