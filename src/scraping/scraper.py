@@ -2,6 +2,7 @@ import asyncio
 import feedparser
 import httpx
 import os
+from typing import List, Optional, Coroutine
 from bs4 import BeautifulSoup
 from loguru import logger
 from newsapi import NewsApiClient
@@ -13,200 +14,224 @@ from src.http_utils import get_random_ua
 from src.scraping.curate import extract_text
 from src.scraping.search_engine import scrape_search
 
-# RSS Scraper
-async def scrape_rss(feed_url, ig):
-    """Scrapes a single RSS feed and returns RawItems."""
-    logger.info(f"Scraping RSS: {feed_url} for IG: {ig}")
-    items = []
+# --- RSS Scraper --- #
+async def scrape_rss(feed_url: str, ig_name: str) -> List[RawItem]:
+    """Scrapes a single RSS feed and converts entries to RawItems."""
+    logger.info(f"Scraping RSS: {feed_url} ({ig_name})")
+    scraped_items: List[RawItem] = []
     try:
+        # feedparser is a robust library for RSS/Atom parsing
         feed = feedparser.parse(feed_url)
         for entry in feed.entries[:10]:
             try:
                 if not hasattr(entry, 'link'): continue
                 
-                desc = entry.get('summary', '')
-                if not desc and 'content' in entry:
-                    desc = entry.content[0].value
+                # Try to find a description or content
+                description = entry.get('summary', '')
+                if not description and 'content' in entry:
+                    description = entry.content[0].value
                 
-                res = await extract_text(entry.link)
-                title = entry.get('title', res.get('title_fallback', 'No Title'))
-                extracted_text = res.get('text') or BeautifulSoup(desc, "lxml").get_text()
+                # Fetch full article text using trafilatura
+                curation = await extract_text(entry.link)
+                title = entry.get('title', curation.get('title_fallback', 'Untitled'))
+                final_text = curation.get('text') or BeautifulSoup(description, "lxml").get_text()
                 
-                items.append(RawItem(
+                scraped_items.append(RawItem(
                     title=title, 
                     url=entry.link, 
-                    text=extracted_text, 
-                    ig=ig, 
+                    text=final_text, 
+                    ig=ig_name, 
                     source="rss"
                 ))
             except Exception as e:
-                logger.debug(f"RSS item failed {entry.link}: {e}")
+                logger.debug(f"Failed to parse RSS item {entry.link}: {e}")
     except Exception as e:
-        logger.error(f"RSS failure {feed_url}: {e}")
-    return items
+        logger.error(f"RSS Feed error {feed_url}: {e}")
+    return scraped_items
 
-# Specialized Platform Scrapers
-async def scrape_unstop(ig):
-    logger.info(f"Hitting Unstop API for IG: {ig}")
-    items = []
+# --- Specialized Platform Scrapers --- #
+async def scrape_unstop(ig_name: str) -> List[RawItem]:
+    """Fetches upcoming hackathons directly from the Unstop API."""
+    logger.info(f"Scraping Unstop for {ig_name}")
+    items: List[RawItem] = []
     try:
         url = f"{UNSTOP_API}?opportunity=hackathons&per_page=15"
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": get_random_ua()}) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
+            response = await client.get(url)
+            if response.status_code == 200:
+                data = response.json()
                 for opp in data.get("data", {}).get("data", []):
                     title = opp.get("title")
-                    seo = opp.get("seo_url")
-                    link = seo if (seo and seo.startswith("http")) else f"https://unstop.com/hackathons/{seo}" if seo else ""
-                    items.append(RawItem(title=title, url=link, text=f"Unstop Hackathon: {title}", ig=ig, source="unstop"))
+                    seo_slug = opp.get("seo_url")
+                    link = seo_slug if (seo_slug and seo_slug.startswith("http")) else f"https://unstop.com/hackathons/{seo_slug}" if seo_slug else ""
+                    items.append(RawItem(title=title, url=link, text=f"Unstop Opportunity: {title}", ig=ig_name, source="unstop"))
     except Exception as e:
-        logger.error(f"Unstop API failed: {e}")
+        logger.error(f"Unstop API error: {e}")
     return items
 
-async def scrape_devfolio(ig):
-    logger.info(f"Hitting Devfolio API for IG: {ig}")
-    items = []
+async def scrape_devfolio(ig_name: str) -> List[RawItem]:
+    """Fetches hackathons from the Devfolio Search API."""
+    logger.info(f"Scraping Devfolio for {ig_name}")
+    items: List[RawItem] = []
     try:
         payload = {"from": 0, "size": 15, "query": {"match_all": {}}}
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": get_random_ua()}) as client:
-            resp = await client.post(DEVFOLIO_API, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
+            response = await client.post(DEVFOLIO_API, json=payload)
+            if response.status_code == 200:
+                data = response.json()
                 for hit in data.get("hits", {}).get("hits", []):
-                    src = hit.get("_source", {})
-                    name = src.get("name")
-                    slug = src.get("slug")
+                    source_data = hit.get("_source", {})
+                    name = source_data.get("name")
+                    slug = source_data.get("slug")
                     link = f"https://{slug}.devfolio.co" if slug else ""
-                    items.append(RawItem(title=name, url=link, text=f"Devfolio Hackathon: {name}", ig=ig, source="devfolio"))
+                    items.append(RawItem(title=name, url=link, text=f"Devfolio Event: {name}", ig=ig_name, source="devfolio"))
     except Exception as e:
-        logger.error(f"Devfolio API failed: {e}")
+        logger.error(f"Devfolio API error: {e}")
     return items
 
-async def scrape_devpost(ig):
-    logger.info(f"Hitting Devpost API for IG: {ig}")
-    items = []
+async def scrape_devpost(ig_name: str) -> List[RawItem]:
+    """Fetches hackathons from Devpost."""
+    logger.info(f"Scraping Devpost for {ig_name}")
+    items: List[RawItem] = []
     try:
         url = f"{DEVPOST_API}?page=1"
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": get_random_ua()}) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
-                for hack in data.get("hackathons", []):
-                    name = hack.get("title")
-                    link = hack.get("url")
-                    items.append(RawItem(title=name, url=link, text=f"Devpost Hackathon: {name}", ig=ig, source="devpost"))
+            response = await client.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                for hackathon in data.get("hackathons", []):
+                    title = hackathon.get("title")
+                    link = hackathon.get("url")
+                    items.append(RawItem(title=title, url=link, text=f"Devpost Competition: {title}", ig=ig_name, source="devpost"))
     except Exception as e:
-        logger.error(f"Devpost API failed: {e}")
+        logger.error(f"Devpost API error: {e}")
     return items
 
-async def scrape_hackerearth(ig):
-    logger.info(f"Hitting HackerEarth API for IG: {ig}")
-    items = []
+async def scrape_hackerearth(ig_name: str) -> List[RawItem]:
+    """Fetches challenges from the HackerEarth Public API."""
+    logger.info(f"Scraping HackerEarth for {ig_name}")
+    items: List[RawItem] = []
     try:
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": get_random_ua()}) as client:
-            resp = await client.get(HACKEREARTH_API)
-            if resp.status_code == 200:
-                data = resp.json()
-                for ev in data.get("response", []):
-                    name = ev.get("title")
-                    link = ev.get("url")
-                    items.append(RawItem(title=name, url=link, text=f"HackerEarth Event: {name}", ig=ig, source="hackerearth"))
+            response = await client.get(HACKEREARTH_API)
+            if response.status_code == 200:
+                data = response.json()
+                for event in data.get("response", []):
+                    title = event.get("title")
+                    link = event.get("url")
+                    items.append(RawItem(title=title, url=link, text=f"HackerEarth Challenge: {title}", ig=ig_name, source="hackerearth"))
     except Exception as e:
-        logger.error(f"HackerEarth API failed: {e}")
+        logger.error(f"HackerEarth API error: {e}")
     return items
 
-async def scrape_newsapi(ig):
-    key = os.environ.get("NEWSAPI_KEY")
-    if not key: return []
-    logger.info(f"Hitting NewsAPI for IG: {ig}")
+async def scrape_newsapi(ig_name: str) -> List[RawItem]:
+    """Fetches technical news articles using the NewsAPI search endpoint."""
+    api_key = os.environ.get("NEWSAPI_KEY")
+    if not api_key: return []
+    logger.info(f"Scraping NewsAPI for {ig_name}")
     try:
-        def _fetch():
-            client = NewsApiClient(api_key=key)
-            query = f"{ig} AND (hackathon OR opportunity OR internship OR research)"
+        def _fetch_blocking():
+            client = NewsApiClient(api_key=api_key)
+            query_string = f"{ig_name} AND (hackathon OR opportunity OR internship OR research)"
             return client.get_everything(
-                q=query,
+                q=query_string,
                 domains="techcrunch.com,theverge.com,wired.com,arstechnica.com,venturebeat.com",
                 language="en",
                 sort_by="publishedAt",
                 page_size=10
             )
-        data = await asyncio.to_thread(_fetch)
-        items = []
-        for art in data.get("articles", []):
+        # NewsAPI library is synchronous, we run it in a thread to keep the pipeline async
+        raw_data = await asyncio.to_thread(_fetch_blocking)
+        items: List[RawItem] = []
+        for article in raw_data.get("articles", []):
             items.append(RawItem(
-                title=art.get("title", ""),
-                url=art.get("url", ""),
-                text=art.get("description", ""),
-                ig=ig,
+                title=article.get("title", ""),
+                url=article.get("url", ""),
+                text=article.get("description", ""),
+                ig=ig_name,
                 source="newsapi"
             ))
         return items
     except Exception as e:
-        logger.error(f"NewsAPI failed: {e}")
+        logger.error(f"NewsAPI error: {e}")
         return []
 
-async def scrape_social(ig):
+async def scrape_social(ig_name: str) -> List[RawItem]:
+    """Placeholder for social monitoring via Apify."""
     token = os.environ.get("APIFY_API_TOKEN")
     if not token: return []
-    logger.info(f"Hitting Apify for Social Monitoring (IG: {ig})")
+    logger.info(f"Scraping Social Monitoring (Apify) for {ig_name}")
     try:
         client = ApifyClient(token)
-        def _fetch():
-            return [] # Placeholder as specific URLs were missing in logs
-        return await asyncio.to_thread(_fetch)
+        def _run_actor():
+            return [] # Future expansion point
+        return await asyncio.to_thread(_run_actor)
     except Exception as e:
-        logger.error(f"Apify Social failed: {e}")
+        logger.error(f"Apify Social error: {e}")
         return []
 
-async def scrape_site(url, ig):
-    logger.info(f"Scraping site: {url} for IG: {ig}")
+async def scrape_direct_site(url: str, ig_name: str) -> List[RawItem]:
+    """Scrapes a specific URL defined in config.yaml."""
+    logger.info(f"Scraping Direct Site: {url} ({ig_name})")
     try:
-        res = await extract_text(url)
-        title = res.get('title_fallback') or url
-        return [RawItem(title=title, url=url, text=res.get('text', ''), ig=ig, source="site")]
+        content = await extract_text(url)
+        title = content.get('title_fallback') or url
+        return [RawItem(title=title, url=url, text=content.get('text', ''), ig=ig_name, source="direct_site")]
     except Exception as e:
-        logger.error(f"Site failure {url}: {e}")
+        logger.error(f"Direct Site error {url}: {e}")
         return []
 
-async def run_scraper(ig_filter=None):
-    """Main entry point to scrape all sources."""
-    cfg = load_config()
-    sources = cfg.get("sources", {})
-    groups = cfg.get("interest_groups", {})
-    settings = cfg.get("pipeline", {})
+# --- Main Entry Point --- #
+async def run_scraper(ig_filter: Optional[str] = None) -> List[RawItem]:
+    """ Coordinates all scraping tasks in parallel with concurrency control. """
+    full_config = load_config()
+    sources_cfg = full_config.get("sources", {})
+    all_groups = full_config.get("interest_groups", {})
+    pipeline_settings = full_config.get("pipeline", {})
     
-    sem = asyncio.Semaphore(settings.get("max_concurrent_scrapers", 3))
+    # Use a semaphore to prevent overloading network/system
+    concurrency_limit = pipeline_settings.get("max_concurrent_scrapers", 3)
+    parallel_gate = asyncio.Semaphore(concurrency_limit)
     
-    async def _limited_scrape(coro):
-        async with sem:
-            return await coro
+    async def _throttled_task(coroutine: Coroutine):
+        async with parallel_gate:
+            return await coroutine
             
-    tasks = []
-    for ig_name, ig_cfg in groups.items():
+    scraping_tasks = []
+    for ig_name, ig_cfg in all_groups.items():
+        # Filtering logic
         if ig_filter and ig_name != ig_filter: continue
         if not ig_cfg.get("active", True): continue
             
-        # Specialized
-        tasks.append(_limited_scrape(scrape_unstop(ig_name)))
-        tasks.append(_limited_scrape(scrape_devfolio(ig_name)))
-        tasks.append(_limited_scrape(scrape_devpost(ig_name)))
-        tasks.append(_limited_scrape(scrape_hackerearth(ig_name)))
-        tasks.append(_limited_scrape(scrape_newsapi(ig_name)))
-        tasks.append(_limited_scrape(scrape_social(ig_name)))
+        # 1. Add Platform Scrapers
+        scraping_tasks.append(_throttled_task(scrape_unstop(ig_name)))
+        scraping_tasks.append(_throttled_task(scrape_devfolio(ig_name)))
+        scraping_tasks.append(_throttled_task(scrape_devpost(ig_name)))
+        scraping_tasks.append(_throttled_task(scrape_hackerearth(ig_name)))
+        scraping_tasks.append(_throttled_task(scrape_newsapi(ig_name)))
+        scraping_tasks.append(_throttled_task(scrape_social(ig_name)))
         
-        # Sources from config.yaml
-        ig_sources = sources.get("interest_groups", {}).get(ig_name, {})
-        global_sources = sources.get("global", {})
+        # 2. Add Sources from config.yaml
+        ig_specific_sources = sources_cfg.get("interest_groups", {}).get(ig_name, {})
+        glob_sources = sources_cfg.get("global", {})
         
-        for rss in global_sources.get("rss", []) + ig_sources.get("rss", []):
-            tasks.append(_limited_scrape(scrape_rss(rss["url"], ig_name)))
-        for search in global_sources.get("search", []) + ig_sources.get("search", []):
-            tasks.append(_limited_scrape(scrape_search(search["query"], ig_name)))
-        for site in ig_sources.get("sites", []):
-            tasks.append(_limited_scrape(scrape_site(site["url"], ig_name)))
+        # Combined RSS feeds
+        for rss in glob_sources.get("rss", []) + ig_specific_sources.get("rss", []):
+            scraping_tasks.append(_throttled_task(scrape_rss(rss["url"], ig_name)))
             
-    results = await asyncio.gather(*tasks)
-    all_items = [item for sublist in results for item in sublist]
-    logger.info(f"Scraper Root: Found {len(all_items)} raw items")
+        # Search Engine queries
+        for search in glob_sources.get("search", []) + ig_specific_sources.get("search", []):
+            scraping_tasks.append(_throttled_task(scrape_search(search["query"], ig_name)))
+            
+        # Direct URL scraping
+        for site in ig_specific_sources.get("sites", []):
+            scraping_tasks.append(_throttled_task(scrape_direct_site(site["url"], ig_name)))
+            
+    # Execute all tasks concurrently
+    aggregated_results = await asyncio.gather(*scraping_tasks)
+    
+    # Flatten results from list of lists to a single list of RawItems
+    all_items = [item for sublist in aggregated_results for item in sublist]
+    
+    logger.info(f"Scraper Final: Harvested {len(all_items)} raw items across all sources.")
     return all_items

@@ -1,70 +1,80 @@
 import json
 import os
+from typing import List, Dict
 from loguru import logger
 from src.config import load_config
 from src.state_manager import get_hash
+from src.db.data_schemas import RawItem
 
-def run_classifier(items):
+def run_classifier(items: List[RawItem]) -> List[RawItem]:
     """
-    Deduplication and Blocklist filtering.
-    Matches 'classifier' role in agent-based structure.
+    The Filtering Agent: Cleans raw data before AI processing.
+    1. Removes duplicate URLs/hashes from the persistent database.
+    2. Filters out items containing blocklisted words or domains.
     """
+    if not items:
+        return []
+        
     pipeline_cfg = load_config("pipeline")
-    blocklist = load_config("blocklist")
+    blocklist_cfg = load_config("blocklist")
     
+    # Path to our 'memory' file
     hash_file = pipeline_cfg.get("seen_hashes_file", "data/seen_hashes.json")
     
-    # Load seen hashes
+    # Load previously seen hashes (the system's memory)
+    seen_hashes: Dict[str, Dict] = {}
     if os.path.exists(hash_file):
         with open(hash_file, "r") as f:
             try:
-                seen_data = json.load(f)
-                if isinstance(seen_data, list):
-                    seen_hashes = {h: {"status": "seen"} for h in seen_data}
-                else:
-                    seen_hashes = seen_data
+                seen_hashes = json.load(f)
             except Exception:
+                logger.warning("Could not load seen_hashes.json, starting fresh.")
                 seen_hashes = {}
-    else:
-        seen_hashes = {}
-        
-    passed = []
-    dropped_dups = 0
-    dropped_block = 0
+                
+    passed_items: List[RawItem] = []
+    stats = {"duplicates": 0, "blocked": 0}
     
-    blocked_words = [w.lower() for w in blocklist.get("words", [])]
-    blocked_domains = [d.lower() for d in blocklist.get("domains", [])]
+    blocked_words = [word.lower() for word in blocklist_cfg.get("words", [])]
+    blocked_domains = [domain.lower() for domain in blocklist_cfg.get("domains", [])]
     
     for item in items:
-        # Check domain blocklist
+        # A. Domain Filter
         domain = item.url.split("//")[-1].split("/")[0].lower()
-        if any(d in domain for d in blocked_domains):
-            dropped_block += 1
+        if any(blocked_domain in domain for blocked_domain in blocked_domains):
+            stats["blocked"] += 1
             continue
             
-        # Check word blocklist
-        content = f"{item.title} {item.text}".lower()
-        if any(w in content for w in blocked_words):
-            dropped_block += 1
+        # B. Keyword Filter (Title & Full Text)
+        content_buffer = f"{item.title} {item.text}".lower()
+        if any(blocked_word in content_buffer for blocked_word in blocked_words):
+            stats["blocked"] += 1
             continue
             
-        # Check duplicate & Status
-        h = get_hash(item)
-        if h in seen_hashes:
-            status = seen_hashes[h].get("status", "seen")
-            if status == "structured":
-                dropped_dups += 1
+        # C. Duplicate & Status Check
+        item_hash = get_hash(item)
+        if item_hash in seen_hashes:
+            current_status = seen_hashes[item_hash].get("status", "seen")
+            
+            # If it's already finished the whole pipeline, skip it!
+            if current_status == "structured":
+                stats["duplicates"] += 1
                 continue
-            item.status = status
+            
+            # Otherwise, keep its existing status
+            item.status = current_status
         
-        passed.append(item)
-        if h not in seen_hashes:
-            seen_hashes[h] = {"status": "seen", "source_id": item.source}
+        passed_items.append(item)
         
-    # Save hashes
+        # Mark as seen so we don't pick it up twice in the same day
+        if item_hash not in seen_hashes:
+            seen_hashes[item_hash] = {"status": "seen", "source": item.source}
+        
+    # Save our memory back to the file
     os.makedirs(os.path.dirname(hash_file), exist_ok=True)
     with open(hash_file, "w") as f:
         json.dump(seen_hashes, f, indent=2)
         
-    logger.info(f"Classifier: {len(items)} in -> {len(passed)} out ({dropped_dups} dups, {dropped_block} blocked)")
-    return passed
+    logger.info(f"Classifier: {len(items)} items processed -> {len(passed_items)} passed")
+    logger.info(f"Summary: {stats['duplicates']} dups removed, {stats['blocked']} blocked by keywords")
+    
+    return passed_items
