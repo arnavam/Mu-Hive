@@ -14,7 +14,7 @@ import asyncio
 from src.scraping.scraper       import fetch_all_events
 from src.scraping.data_cleaner  import clean_events
 from src.scraping.curate        import curate, MASTER_IGS, IG_KEYWORDS
-from src.db.database            import save_events, get_collection
+from src.db.mongo_database            import save_events, get_collection
 
 def _render(grouped: dict) -> None:
     print("\n" + "═" * 70)
