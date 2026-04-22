@@ -1,3 +1,12 @@
+aiohttp
+aiofiles
+pytest
+pytest-asyncio
+pymongo
+python-dotenv
+certifi
+dnspython
+
 click==8.3.1
 colorama==0.4.6
 ddgs==9.12.0

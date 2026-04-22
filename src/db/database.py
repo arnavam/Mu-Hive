@@ -82,3 +82,37 @@ class Database:
     def close(self):
         """Close the MongoDB connection."""
         self.client.close()
+
+def get_collection():
+    """Retrieve the main 'events' collection directly."""
+    return Database().events
+
+def save_events(grouped: dict):
+    """
+    Parses the grouped events from eventslink_parser and stores them
+    as 'not processed' so that the scraper_agent can pick them up.
+    """
+    db_obj = Database()
+    inserted = 0
+    modified = 0
+    for ig, events_list in grouped.items():
+        for event in events_list:
+            title = event.get('eventName', 'Unknown')
+            link = event.get('registrationLink', '')
+            if not link:
+                continue
+                
+            if not db_obj.link_exists(link, ig):
+                doc_id = db_obj.insert_event(title, link, ig, "eventslink_parser", "not processed")
+                if doc_id:
+                    inserted += 1
+                
+                event_extras = {k: v for k, v in event.items() if k not in ["eventName", "registrationLink"]}
+                if event_extras and doc_id:
+                    db_obj.events.update_one({"_id": doc_id}, {"$set": {"parser_metadata": event_extras}})
+            else:
+                modified += 1
+                
+    db_obj.close()
+    return inserted, modified
+
