@@ -3,26 +3,23 @@ import json
 from loguru import logger
 from openai import OpenAI
 from aiolimiter import AsyncLimiter
-from .config import load_config
-from .circuit_breaker import mark_failure, is_cooled_down
+from src.config import load_config
+from src.circuit_breaker import mark_failure, is_cooled_down
 
 _limiter_cache = {}
 
-# Returns aiolimiter using rpm from models.yaml for that specific model
-# Cached so that multiple tasks using the same model share the same limiter
 def get_limiter(provider, model_name):
+    """Returns aiolimiter based on provider settings. Shared across tasks."""
     models = load_config("models")
     key = f"{provider}:{model_name}"
     
     if key not in _limiter_cache:
-        # Check provider specific RPM in models.yaml
-        provider_cfg = models["providers"].get(provider, {})
-        rpm = provider_cfg.get("rpm", 10) # default to 10 if missing
+        provider_cfg = models.get("providers", {}).get(provider, {})
+        rpm = provider_cfg.get("rpm", 10)
         _limiter_cache[key] = AsyncLimiter(rpm, 60)
         
     return _limiter_cache[key]
 
-# Reads models.yaml, returns a simple wrapper for the configured model
 class LLMClient:
     def __init__(self, client, model, temperature, max_tokens, provider):
         self.client = client
@@ -33,7 +30,6 @@ class LLMClient:
 
     def create(self, response_model, messages):
         schema = json.dumps(response_model.model_json_schema(), indent=2)
-        # Append schema instructions
         sys_msg = messages[0]["content"] + f"\n\nReturn EXACTLY valid JSON matching this schema:\n{schema}"
         messages[0]["content"] = sys_msg
         
@@ -46,7 +42,6 @@ class LLMClient:
                 max_tokens=self.max_tokens
             )
             
-            # Defensive check for OpenRouter/Provider inconsistencies
             if not resp or not resp.choices or not resp.choices[0].message.content:
                 raise ValueError("LLM returned an empty or malformed response.")
                 
@@ -57,19 +52,22 @@ class LLMClient:
                 mark_failure(self.provider)
             raise e
 
-# Reads models.yaml, returns a client for that role and tier
 def make_llm_client(role, tier="cheap"):
+    """Reads models config and returns configured LLMClient for a role/tier."""
     models = load_config("models")
-    role_cfg = models["roles"][role]
+    if not models or "roles" not in models:
+        logger.error("LLM Roles not found in config")
+        return None
+        
+    role_cfg = models["roles"].get(role)
+    if not role_cfg:
+        logger.error(f"Role {role} not found in config")
+        return None
     
-    # Try specified tier, fallback to first available
     tier_cfg = role_cfg.get(tier) or list(role_cfg.values())[0]
     provider_name = tier_cfg["provider"]
-    provider_cfg = models["providers"][provider_name]
+    provider_cfg = models["providers"].get(provider_name)
     
-    # BUG FIX: Only check if the PROVIDER is in cooldown.
-    # Previously this also checked the model, which caused unnecessary
-    # fallback triggers when only the model name was stale in circuit state.
     if not is_cooled_down(provider_name):
         logger.warning(f"Provider {provider_name} is in COOLDOWN. Attempting fallback.")
         if tier != "fallback":

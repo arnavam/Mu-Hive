@@ -11,15 +11,13 @@ from src.circuit_breaker import mark_failure, is_cooled_down
 def test_mark_failure_sets_expiry_correctly(mock_time, mock_file, mock_get_state, mock_load_config):
     # Setup
     mock_time.return_value = 1000.0
-    mock_load_config.return_value = {"pipeline": {"circuit_cooldown_seconds": 300}}
+    mock_load_config.return_value = {"circuit_cooldown_seconds": 300}
     mock_get_state.return_value = {}
     
     # Run
     mark_failure("groq")
     
     # Assert
-    # Extract the data passed to json.dump
-    # get the string written to the file
     written_data = "".join(call.args[0] for call in mock_file().write.call_args_list)
     state = json.loads(written_data)
     

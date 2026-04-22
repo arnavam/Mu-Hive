@@ -1,10 +1,10 @@
 import asyncio
 from pydantic import BaseModel, Field
 from loguru import logger
-from ..llm_client import make_llm_client, get_limiter
-from ..retry import with_retry
-from ..config import load_config
-from ..state_manager import update_hashes_status
+from src.llm import make_llm_client, get_limiter
+from src.retry import with_retry
+from src.config import load_config
+from src.state_manager import update_hashes_status
 
 class Verification(BaseModel):
     is_real: bool = Field(description="Is this a genuine tech opportunity?")
@@ -14,7 +14,7 @@ class Verification(BaseModel):
 
 @with_retry
 async def _verify_one(item, client, limiter, min_score):
-    groups = load_config("groups")["interest_groups"]
+    groups = load_config("interest_groups")
     ig_keywords = ", ".join(groups.get(item.ig, {}).get("keywords", []))
     
     messages = [
@@ -24,8 +24,6 @@ async def _verify_one(item, client, limiter, min_score):
     
     async with limiter:
         try:
-            # client.create is sync inside our async loop, which is okay for Together RPMs.
-            # However, to be fully async for high scale, we'd use asyncio.to_thread if RPM > 100.
             verif = await asyncio.to_thread(client.create, Verification, messages)
             
             if not verif.is_real or not verif.is_relevant or verif.score < min_score:
@@ -39,28 +37,31 @@ async def _verify_one(item, client, limiter, min_score):
             logger.error(f"LLM error for {item.url}: {e}")
             return {"item": item, "score": 0.0, "status": "flagged"}
 
-async def run_verifier(items):
+async def run_validater(items):
+    """
+    Validates items for genuineness and relevance.
+    Matches 'validater' agent role.
+    """
     if not items:
         return []
         
-    settings = load_config("settings")["pipeline"]
-    routing = settings.get("ig_routing", {})
-    min_score = settings.get("min_verified_score", 0.5)
-    max_premium = settings.get("max_premium_items_per_run", 50)
+    pipeline_cfg = load_config("pipeline")
+    routing = pipeline_cfg.get("ig_routing", {})
+    min_score = pipeline_cfg.get("min_verified_score", 0.5)
+    max_premium = pipeline_cfg.get("max_premium_items_per_run", 50)
     
     premium_used = 0
     premium_lock = asyncio.Lock()
-    semaphore = asyncio.Semaphore(settings["verifier_concurrency"])
+    semaphore = asyncio.Semaphore(pipeline_cfg.get("verifier_concurrency", 2))
     
-    logger.info(f"Verifying {len(items)} items with tiered routing (Concurrency: {settings['verifier_concurrency']})...")
-    final = []
+    logger.info(f"Validating {len(items)} items (Concurrency: {pipeline_cfg.get('verifier_concurrency', 2)})...")
     
     async def process_item(item):
         nonlocal premium_used
         
-        # 1. Skip if already verified (from stage_02_filter)
+        # 1. Skip if already verified
         if getattr(item, "status", None) == "verified":
-            logger.info(f"Skipping Verifier: {item.title[:50]} (Already verified)")
+            logger.info(f"Skipping Validater: {item.title[:50]} (Already verified)")
             return {"item": item, "score": 1.0, "status": "ready"}
             
         # 2. Resolve Tier and Check Quota
@@ -72,7 +73,7 @@ async def run_verifier(items):
                 logger.warning(f"Premium quota reached. {item.ig} -> cheap.")
                 target_tier = "cheap"
             
-        # 3. Execute Verification with throttling
+        # 3. Execute Verification
         async with semaphore:
             client = make_llm_client("verifier", tier=target_tier)
             limiter = get_limiter(client.provider, client.model)
@@ -102,20 +103,13 @@ async def run_verifier(items):
                             async with premium_lock:
                                 premium_used += 1
             
-            if res:
-                # Per-IG result limits (local check for this run)
-                ig_limit = settings.get("per_ig_limits", {}).get(item.ig, {}).get("max_verified", 20)
-                # Note: ig_count check is harder in parallel, we'll accept a slight overage or use another lock.
-                # Simplified: accept the batch results and filter at the end if needed.
-                return res
-        return None
+            return res
 
-    # Run all items in parallel batch
     results = await asyncio.gather(*[process_item(item) for item in items])
     final = [r for r in results if r is not None]
             
-    # Mark passed items as verified in the global hash database
+    # Mark passed items as verified
     update_hashes_status(final, "verified")
     
-    logger.info(f"Verifier: {len(items)} in -> {len(final)} out (Premium used: {premium_used})")
+    logger.info(f"Validater: {len(items)} in -> {len(final)} out (Premium used: {premium_used})")
     return final

@@ -3,11 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Optional
 from loguru import logger
-from ..llm_client import make_llm_client, get_limiter
-from ..retry import with_retry
-from ..config import load_config
-from ..state_manager import update_hashes_status, get_hash
-from ..schemas import CleanItem
+from src.llm import make_llm_client, get_limiter
+from src.retry import with_retry
+from src.config import load_config
+from src.state_manager import update_hashes_status, get_hash
+from src.db.data_schemas import CleanItem
 
 class Extraction(BaseModel):
     summary: str = Field(description="2-sentence summary")
@@ -17,7 +17,7 @@ class Extraction(BaseModel):
 @with_retry
 async def _structure_one(entry, client, limiter):
     item = entry["item"]
-    groups = load_config("groups")["interest_groups"]
+    groups = load_config("interest_groups")
     categories = ", ".join(groups.get(item.ig, {}).get("categories", []))
     
     messages = [
@@ -59,21 +59,22 @@ async def _structure_one(entry, client, limiter):
                 created_at=datetime.now().isoformat()
             )
 
-async def run_structurer(verified_entries):
+async def run_summarizer(verified_entries):
+    """
+    Summarizes and structures verified items.
+    Matches 'summarizer' agent role.
+    """
     if not verified_entries:
         return []
         
-    settings = load_config("settings")["pipeline"]
-    routing = settings.get("ig_routing", {})
-    semaphore = asyncio.Semaphore(settings["structurer_concurrency"])
+    pipeline_cfg = load_config("pipeline")
+    routing = pipeline_cfg.get("ig_routing", {})
+    semaphore = asyncio.Semaphore(pipeline_cfg.get("structurer_concurrency", 2))
     
-    logger.info(f"Structuring {len(verified_entries)} items with tiered routing (Concurrency: {settings['structurer_concurrency']})...")
-    final = []
+    logger.info(f"Summarizing {len(verified_entries)} items (Concurrency: {pipeline_cfg.get('structurer_concurrency', 2)})...")
     
     async def process_entry(entry):
         item = entry["item"]
-        
-        # 1. Resolve Tier
         ig_cfg = routing.get(item.ig) or routing.get("default", {})
         target_tier = ig_cfg.get("structurer", "cheap")
         
@@ -81,18 +82,13 @@ async def run_structurer(verified_entries):
             client = make_llm_client("structurer", tier=target_tier)
             limiter = get_limiter(client.provider, client.model)
             
-            res = await _structure_one(entry, client, limiter)
-            if res:
-                # Check per-IG structuring limits (simplified for parallel)
-                # We filter at the end if needed to be strict.
-                return res
-        return None
+            return await _structure_one(entry, client, limiter)
 
     results = await asyncio.gather(*[process_entry(e) for e in verified_entries])
     final = [r for r in results if r is not None]
             
-    # Mark successfully structured items in the global hash database
+    # Mark successfully structured items
     update_hashes_status(final, "structured")
     
-    logger.info(f"Structurer: {len(final)} items completed")
+    logger.info(f"Summarizer: {len(final)} items completed")
     return final

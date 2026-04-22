@@ -1,7 +1,7 @@
 import pytest
 import os
 from unittest.mock import patch, MagicMock
-from src.llm_client import make_llm_client
+from src.llm import make_llm_client
 
 @pytest.fixture
 def mock_models_cfg():
@@ -36,9 +36,9 @@ def mock_models_cfg():
         }
     }
 
-@patch("src.llm_client.load_config")
-@patch("src.llm_client.is_cooled_down")
-@patch("src.llm_client.OpenAI")
+@patch("src.llm.load_config")
+@patch("src.llm.is_cooled_down")
+@patch("src.llm.OpenAI")
 def test_make_llm_client_returns_correct_model(mock_openai, mock_cooled_down, mock_load_config, mock_models_cfg):
     # Setup
     mock_load_config.return_value = mock_models_cfg
@@ -51,9 +51,9 @@ def test_make_llm_client_returns_correct_model(mock_openai, mock_cooled_down, mo
     assert client_wrapper.model == "llama-3.1-8b-instant"
     assert client_wrapper.provider == "groq"
 
-@patch("src.llm_client.load_config")
-@patch("src.llm_client.is_cooled_down")
-@patch("src.llm_client.OpenAI")
+@patch("src.llm.load_config")
+@patch("src.llm.is_cooled_down")
+@patch("src.llm.OpenAI")
 def test_make_llm_client_falls_back_on_cooldown(mock_openai, mock_cooled_down, mock_load_config, mock_models_cfg):
     # Setup
     mock_load_config.return_value = mock_models_cfg

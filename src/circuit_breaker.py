@@ -1,11 +1,12 @@
 import os
 import time
 import json
-from .config import load_config
+from src.config import load_config
 
 # Helpers for Circuit Breaker (LITE)
 def get_circuit_state():
-    path = "state/circuit_state.json"
+    pipeline_cfg = load_config("pipeline")
+    path = pipeline_cfg.get("circuit_state_file", "data/circuit_state.json")
     if not os.path.exists(path):
         return {}
     try:
@@ -16,13 +17,15 @@ def get_circuit_state():
         return {}
 
 def mark_failure(provider_or_model):
-    settings = load_config("settings")["pipeline"]
+    pipeline_cfg = load_config("pipeline")
     state = get_circuit_state()
     state[provider_or_model] = {
         "last_429": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "expiry": time.time() + settings["circuit_cooldown_seconds"]
+        "expiry": time.time() + pipeline_cfg.get("circuit_cooldown_seconds", 300)
     }
-    with open("state/circuit_state.json", "w") as f:
+    path = pipeline_cfg.get("circuit_state_file", "data/circuit_state.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         json.dump(state, f)
 
 def is_cooled_down(provider_or_model):

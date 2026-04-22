@@ -2,7 +2,7 @@ import json
 import csv
 import os
 from loguru import logger
-from ..config import load_config
+from src.config import load_config
 
 # Console output writer
 def _write_console(items, cfg):
@@ -35,7 +35,7 @@ def _write_console(items, cfg):
 
 # JSON file output writer
 def _write_json(items, cfg):
-    path = cfg.get("path", "output/results.json")
+    path = cfg.get("path", "data/results.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = [item.model_dump() for item in items]
     indent = 2 if cfg.get("pretty") else None
@@ -45,7 +45,7 @@ def _write_json(items, cfg):
 
 # CSV file output writer
 def _write_csv(items, cfg):
-    path = cfg.get("path", "output/results.csv")
+    path = cfg.get("path", "data/results.csv")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not items:
         return
@@ -58,10 +58,9 @@ def _write_csv(items, cfg):
 
 # Main entry point to run all active outputs
 def run_outputs(items):
-    try:
-        outputs = load_config("outputs")["outputs"]
-    except Exception:
-        logger.error("Could not load outputs config")
+    outputs = load_config("outputs")
+    if not outputs:
+        logger.error("No outputs configured")
         return
     
     for name, cfg in outputs.items():

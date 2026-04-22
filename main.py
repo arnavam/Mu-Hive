@@ -2,64 +2,34 @@ import asyncio
 import sys
 import os
 from loguru import logger
-import src.pipeline.stage_01_scraper as scraper
-import src.pipeline.stage_02_filter as filter
-import src.pipeline.stage_03_verifier as verifier
-import src.pipeline.stage_04_structurer as structurer
-import src.pipeline.stage_05_writer as output_writer
-from src.config import load_config
+from src.orchestrator import run_pipeline
 
 async def main():
-    # 1. Setup
+    # Setup Logger
     logger.remove()
     logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>")
     
-    # Check env vars
-    if "TOGETHER_API_KEY" not in os.environ and "GROQ_API_KEY" not in os.environ:
-         logger.warning("No primary LLM keys (TOGETHER or GROQ) found in environment!")
+    # Environment Check
+    if not any(k in os.environ for k in ["TOGETHER_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"]):
+         logger.warning("No LLM API keys found in environment!")
     
-    if "TAVILY_API_KEY" not in os.environ or not os.environ["TAVILY_API_KEY"]:
-         logger.warning("TAVILY_API_KEY missing! Search fallback will be disabled.")
-
-    # Parse args
+    # Argument Parsing
     ig_filter = None
     if "--ig" in sys.argv:
         idx = sys.argv.index("--ig")
         if idx + 1 < len(sys.argv):
              ig_filter = sys.argv[idx + 1]
-             logger.info(f"Filtering for IG: {ig_filter}")
+             logger.info(f"IG Filter: {ig_filter}")
 
-    logger.info("Starting MuHive v1 Pipeline...")
-
-    # 2. Pipeline Execution
-    try:
-        # Step 1: Scrape
-        raw_items = await scraper.run_scraper(ig_filter=ig_filter)
-        
-        # Step 2: Filter
-        filtered_items = filter.run_filter(raw_items)
-        
-        # Step 3: Verify
-        verified_entries = await verifier.run_verifier(filtered_items)
-        
-        # Step 4: Structure
-        clean_items = await structurer.run_structurer(verified_entries)
-        
-        # Step 5: Output
-        output_writer.run_outputs(clean_items)
-        
-        # 3. Summary
-        print("\n" + "#" * 50)
-        print("  MUHIVE v1 PIPELINE SUMMARY")
-        print("#" * 50)
-        print(f"  Raw Scraped:     {len(raw_items)}")
-        print(f"  Filtered:        {len(filtered_items)}")
-        print(f"  Verified:        {len(verified_entries)}")
-        print(f"  Structured:      {len(clean_items)}")
-        print("#" * 50 + "\n")
-        
-    except Exception as e:
-        logger.exception(f"Pipeline crashed: {e}")
+    # Launch Pipeline
+    await run_pipeline(ig_filter=ig_filter)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user.")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1)

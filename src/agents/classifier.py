@@ -1,22 +1,24 @@
 import json
 import os
 from loguru import logger
-from ..config import load_config
-from ..state_manager import get_hash
+from src.config import load_config
+from src.state_manager import get_hash
 
-# Deduplication and Blocklist filtering
-def run_filter(items):
-    settings = load_config("settings")["pipeline"]
+def run_classifier(items):
+    """
+    Deduplication and Blocklist filtering.
+    Matches 'classifier' role in agent-based structure.
+    """
+    pipeline_cfg = load_config("pipeline")
     blocklist = load_config("blocklist")
     
-    hash_file = settings["seen_hashes_file"]
+    hash_file = pipeline_cfg.get("seen_hashes_file", "data/seen_hashes.json")
     
-    # Load seen hashes (Now a dictionary instead of a simple list)
+    # Load seen hashes
     if os.path.exists(hash_file):
         with open(hash_file, "r") as f:
             try:
                 seen_data = json.load(f)
-                # Handle migration from old list format
                 if isinstance(seen_data, list):
                     seen_hashes = {h: {"status": "seen"} for h in seen_data}
                 else:
@@ -50,22 +52,19 @@ def run_filter(items):
         h = get_hash(item)
         if h in seen_hashes:
             status = seen_hashes[h].get("status", "seen")
-            # If already structured, we skip entirely (it's in the final output already)
             if status == "structured":
                 dropped_dups += 1
                 continue
-            
-            # If verified but not structured, we keep it but mark it to skip verifier
-            item.status = status # Dynamically attach to RawItem object
+            item.status = status
         
         passed.append(item)
         if h not in seen_hashes:
             seen_hashes[h] = {"status": "seen", "source_id": item.source}
         
-    # Save hashes (In new dictionary format)
+    # Save hashes
     os.makedirs(os.path.dirname(hash_file), exist_ok=True)
     with open(hash_file, "w") as f:
         json.dump(seen_hashes, f, indent=2)
         
-    logger.info(f"Filter: {len(items)} in -> {len(passed)} out ({dropped_dups} dups, {dropped_block} blocked)")
+    logger.info(f"Classifier: {len(items)} in -> {len(passed)} out ({dropped_dups} dups, {dropped_block} blocked)")
     return passed
