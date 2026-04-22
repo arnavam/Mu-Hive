@@ -1,5 +1,7 @@
 # src/config/sources.py
 # Curated list of trusted AI & tech RSS feeds for the Scout Agent.
+# Note: Sites like reddit.com, openai.com, news.google.com block automated
+# scraping (403 Forbidden) and have been excluded intentionally.
 
 AI_RSS_FEEDS = [
     # --- Major Tech & AI News ---
@@ -11,9 +13,12 @@ AI_RSS_FEEDS = [
     # --- Research & Academic ---
     "https://news.mit.edu/rss/topic/artificial",
     "https://deepmind.google/blog/rss.xml",
-    "https://openai.com/blog/rss.xml",
     "https://blogs.nvidia.com/blog/category/deep-learning/feed/",
+
+    # --- Aggregated / Community ---
+    "https://hnrss.org/frontpage?q=AI",  # Hacker News — open access, no bot blocks
 ]
+
 
 WEB_DEV_RSS_FEEDS = [
     "https://css-tricks.com/feed/",

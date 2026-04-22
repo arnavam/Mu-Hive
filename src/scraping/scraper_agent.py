@@ -1,0 +1,283 @@
+import logging
+logger = logging.getLogger(__name__)
+
+import asyncio, base64, os, time
+import httpx, trafilatura
+import feedparser
+from bs4 import BeautifulSoup
+from readability import Document
+from playwright.async_api import async_playwright
+from playwright_stealth import Stealth
+from src.db.database import Database
+from dotenv import load_dotenv
+
+load_dotenv()
+ 
+try:
+    import warnings
+    warnings.filterwarnings("ignore", category=UserWarning, module='newspaper')
+    from newspaper import Article as NArticle
+    HAS_NEWSPAPER = True
+except ImportError:
+    HAS_NEWSPAPER = False
+ 
+# ── Config ────────────────────────────────────────────────────────────────────
+MIN_WORDS    = 120
+SCRAPE_LIMIT = 50
+TIMEOUT      = 30   # seconds
+PW_WAIT_MS   = 4000    # ms to wait after page load for JS
+MAX_IMAGES   = 5       # max images extracted (URLs only)
+USER_AGENT   = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+ 
+ 
+# ── Text extraction ───────────────────────────────────────────────────────────
+def extract(html: str) -> str:
+    """Run all extractors on HTML, return the longest result."""
+    candidates = []
+ 
+    t = trafilatura.extract(html, include_tables=True, favor_recall=True)
+    candidates.append(t or "")
+ 
+    try:
+        soup = BeautifulSoup(Document(html).summary(), "lxml")
+        candidates.append(soup.get_text(" ", strip=True))
+    except Exception:
+        pass
+ 
+    if HAS_NEWSPAPER:
+        try:
+            art = NArticle(""); art.set_html(html); art.parse()
+            candidates.append(art.text or "")
+        except Exception:
+            pass
+ 
+    return max(candidates, key=lambda t: len(t.split()), default="")
+ 
+ 
+# ── Layer 1: plain HTTP ───────────────────────────────────────────────────────
+async def l1_httpx(url: str) -> tuple | None:
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT,
+                                     headers={"User-Agent": USER_AGENT}) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+ 
+        soup     = BeautifulSoup(r.text, "lxml")
+        img_urls = [i["src"] for i in soup.find_all("img", src=True)
+                    if i["src"].startswith("http")][:MAX_IMAGES]
+        text     = extract(r.text)
+ 
+        return (text, "", "", img_urls) if len(text.split()) >= MIN_WORDS else None
+    except Exception as e:
+        logger.info(f"    [L1:{url[:50]}] {e}"); return None
+ 
+ 
+# ── Layer 2: Playwright (JS-rendered pages) ───────────────────────────────────
+async def l2_playwright(url: str, browser) -> tuple | None:
+    try:
+        page = await (await browser.new_context(user_agent=USER_AGENT)).new_page()
+        await Stealth().apply_stealth_async(page)  # one line, fixes most 403s
+        
+        await page.goto(url, timeout=TIMEOUT * 1000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(PW_WAIT_MS)
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(1000)
+
+        try:
+            html = await page.content()
+        except Exception:
+            await page.close(); return None
+        
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+            
+        try:
+            meta = await page.evaluate(
+                'document.querySelector("meta[name=\'description\']")?.content || ""')
+        except Exception:
+            meta = ""
+            
+        try:
+            imgs = await page.evaluate(
+                "Array.from(document.images).map(i=>i.src).filter(s=>s.startsWith('http'))")
+        except Exception:
+            imgs = []
+            
+        await page.close()
+
+        text = extract(html)
+        return (text, title, meta, imgs[:MAX_IMAGES]) if len(text.split()) >= MIN_WORDS else None
+    except Exception as e:
+        logger.info(f"    [L2:{url[:50]}] {e}"); return None
+ 
+ 
+# ── Core scrape (reusable) ────────────────────────────────────────────────────
+async def scrape_url(url: str, browser=None) -> dict | None:
+    """
+    Scrape a URL, returning full text.
+    Returns dict with keys: text, page_title, meta_description, layer
+    or None if both layers fail.
+    """
+    logger.info(f"  [L1:{url[:50]}] trying...")
+    result = await l1_httpx(url)
+    label = "L1"
+    
+    if not result:
+        logger.info(f"  [L2:{url[:50]}] trying...")
+        if browser:
+            result = await l2_playwright(url, browser)
+        else:
+            async with async_playwright() as p:
+                temp_browser = await p.chromium.launch(headless=True)
+                result = await l2_playwright(url, temp_browser)
+                await temp_browser.close()
+        label = "L2"
+
+    if result:
+        text, title, meta, imgs = result
+        logger.info(f"  [{label}:{url[:50]}] ✓ {len(text.split())} words")
+        return {"text": text, "page_title": title, "meta_description": meta, "layer": label}
+
+    logger.info(f"  [FAIL:{url[:50]}] both layers failed")
+    return None
+ 
+ 
+# ── Pending-links scraper ─────────────────────────────────────────────────────
+async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
+    logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] scraper starting...")
+    db      = Database()
+    pending = db.find_pending_scrape(limit=limit)
+
+    if not pending:
+        logger.info("nothing to scrape.")
+        db.close()
+        return
+    
+    logger.info(f"{len(pending)} doc(s) queued.")
+    semaphore = asyncio.Semaphore(5)
+
+    async def scrape_one(doc, browser):
+        async with semaphore:
+            doc_id, link = doc["_id"], doc.get("link")
+            logger.info(f"\n── {link}")
+
+            if not (isinstance(link, str) and link.startswith(("http://", "https://"))):
+                db.update_event_scrape(doc_id, status="scrape_failed",
+                                       scrape_error="invalid URL")
+                return
+                
+            SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
+            if any(spam in link for spam in SPAM_DOMAINS):
+                logger.info("  [Skip] Spam domain filtered.")
+                db.update_event_scrape(doc_id, status="scrape_failed", scrape_error="spam domain")
+                return
+
+            result = await scrape_url(link, browser)
+
+            if not result:
+                db.update_event_scrape(doc_id, status="scrape_failed",
+                                       scrape_error="all layers failed")
+                return
+
+            ok = db.update_event_scrape(
+                doc_id,
+                status="scraped",
+                scraped_page_title=result["page_title"],
+                scraped_meta_description=result["meta_description"],
+                scraped_full_text=result["text"],
+                scrape_layer=result["layer"],
+            )
+            logger.info(f"  [{'saved' if ok else 'warn: no match'}:{link[:40]}] "
+                        f"layer={result['layer']} words={len(result['text'].split())}")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        await asyncio.gather(*[scrape_one(doc, browser) for doc in pending])
+        await browser.close()
+
+    db.close()
+    logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] scraper done.")
+
+
+# ── RSS Feed scraper ──────────────────────────────────────────────────────────
+async def run_rss_agent():
+    logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper starting...")
+    db        = Database()
+    seen_urls = set()
+    semaphore = asyncio.Semaphore(5)
+
+    SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
+
+    async def process_rss_feed(feed_url, browser):
+        try:
+            logger.info(f"Fetching RSS: {feed_url}")
+            # feedparser fetches natively — works for all feeds without httpx
+            feed = feedparser.parse(feed_url)
+
+            status = feed.get("status", 0)
+            if status >= 400:
+                logger.info(f"[RSS Error] {feed_url} -> HTTP {status}")
+                return
+
+            if not feed.entries:
+                logger.info(f"[RSS Skip] {feed_url} -> 0 entries returned")
+                return
+
+            logger.info(f"[RSS] {feed_url} -> {len(feed.entries)} entries, processing top 5")
+
+            for entry in feed.entries[:5]:
+                async with semaphore:
+                    link  = entry.get("link")
+                    title = entry.get("title", "No Title")
+
+                    if not link:
+                        continue
+                    if link in seen_urls:
+                        continue
+                    seen_urls.add(link)
+                    if db.link_exists(link, "RSS Feed"):
+                        logger.info(f"  [Skip] Already in DB: {link[:60]}")
+                        continue
+
+                    logger.info(f"\n── RSS Item: {title} | {link}")
+
+                    if any(spam in link for spam in SPAM_DOMAINS):
+                        logger.info("  [Skip] Spam domain filtered.")
+                        continue
+
+                    result = await scrape_url(link, browser)
+                    if not result:
+                        logger.info(f"  [Fail] RSS item scrape failed: {link[:50]}")
+                        continue
+
+                    doc_id = db.insert_event(title, link, "RSS Feed", "RSS", "scraped")
+                    if doc_id:
+                        ok = db.update_event_scrape(
+                            doc_id,
+                            status="scraped",
+                            scraped_page_title=result["page_title"],
+                            scraped_meta_description=result["meta_description"],
+                            scraped_full_text=result["text"],
+                            scrape_layer=result["layer"],
+                        )
+                        logger.info(f"  [{'saved' if ok else 'warn: no match'}:{link[:40]}] "
+                                    f"(RSS) layer={result['layer']} words={len(result['text'].split())}")
+        except Exception as e:
+            logger.info(f"[RSS Error] {feed_url} -> {e}")
+
+    from src.config.sources import AI_RSS_FEEDS
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        logger.info("\n--- Scraping RSS Feeds ---")
+        await asyncio.gather(*[process_rss_feed(feed_url, browser) for feed_url in AI_RSS_FEEDS])
+        await browser.close()
+
+    db.close()
+    logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper done.")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_scraper_agent())
