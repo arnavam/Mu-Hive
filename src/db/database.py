@@ -25,21 +25,76 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     url TEXT NOT NULL,
                     data JSONB,
-                    summary TEXT,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS events (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT,
+                    type TEXT,
+                    platform TEXT,
+                    location TEXT,
+                    link TEXT UNIQUE,
+                    days_left INTEGER,
+                    ig TEXT,
+                    score INTEGER,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
             """)
 
-    def save_scrape_result(self, url, data, summary=None):
+    def save_scrape_result(self, url, data):
         conn = self._get_connection()
         with conn.cursor() as cur:
             # Convert data to JSON string for the JSONB column
             json_data = json.dumps(data)
             cur.execute("""
-                INSERT INTO scraped_data (url, data, summary, created_at)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO scraped_data (url, data, created_at)
+                VALUES (%s, %s, %s)
                 RETURNING id;
-            """, (url, json_data, summary, datetime.now(timezone.utc)))
+            """, (url, json_data, datetime.now(timezone.utc)))
+            return cur.fetchone()[0]
+
+    def get_scrape_result(self, record_id):
+        conn = self._get_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM scraped_data WHERE id = %s;", (record_id,))
+            return cur.fetchone()
+
+
+    def upsert_event(self, event_data):
+        """
+        Upserts an event based on the link.
+        Updates all fields and updated_at on conflict.
+        """
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO events (
+                    title, type, platform, location, link, days_left, ig, score, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (link) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    type = EXCLUDED.type,
+                    platform = EXCLUDED.platform,
+                    location = EXCLUDED.location,
+                    days_left = EXCLUDED.days_left,
+                    ig = EXCLUDED.ig,
+                    score = EXCLUDED.score,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id;
+            """, (
+                event_data.get('title'),
+                event_data.get('type'),
+                event_data.get('platform'),
+                event_data.get('location'),
+                event_data.get('link'),
+                event_data.get('days_left'),
+                event_data.get('ig'),
+                event_data.get('score'),
+                datetime.now(timezone.utc)
+            ))
             return cur.fetchone()[0]
 
     def get_all_results(self):

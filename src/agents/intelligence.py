@@ -48,4 +48,52 @@ class IntelligenceAgent:
         except Exception as e:
             return f"Error during summarization: {str(e)}"
 
+    def analyze_event(self, content):
+        if not self.client:
+            return None
+        
+        if not content:
+            return None
+
+        if isinstance(content, (dict, list)):
+            import json
+            content = json.dumps(content, indent=2)
+
+        max_chars = 15000 
+        if len(content) > max_chars:
+            content = content[:max_chars] + "... [truncated]"
+
+        prompt = f"""
+        Extract structured hackathon/event information from the following scraped data.
+        Provide the result in RAW JSON format with the following keys:
+        - title (string): The name of the event.
+        - type (string): The type of event (e.g., Hackathon, Internship, Conference).
+        - platform (string): The hosting platform (e.g., Devpost, Unstop, etc.).
+        - location (string): Where it is held (e.g., Online, City Name).
+        - days_left (integer): Number of days remaining for registration/submission. If not found, use null.
+        - ig (string): Instagram handle or link if mentioned, otherwise null.
+        - score (integer): A relevance score from 1-100 based on the quality and prestige of the event.
+
+        Data:
+        {content}
+        
+        Return ONLY the JSON object.
+        """
+
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a data extraction specialist. Always return valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            import json
+            return json.loads(completion.choices[0].message.content.strip())
+        except Exception as e:
+            print(f"Error during event analysis: {str(e)}")
+            return None
+
 intelligence = IntelligenceAgent()

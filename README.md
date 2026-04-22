@@ -42,11 +42,36 @@ uv add -r requirements.txt
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## 🚀 Current Status: Multi-Agent Intelligence Pipeline
+The project is now a functional multi-agent pipeline with a web interface.
 
-### Next Steps
-*   Define core schemas in `src/db/`.
-*   Implement basic LLM wrapper in `src/llm/`.
-*   Create the first agents in `src/agents/`.
+### Key Features
+*   **Scout Agent**: Uses **Firecrawl** for high-quality web scraping and crawling.
+*   **Intelligence Agent**: Uses **Groq (Llama 3.1)** to extract structured event data and generate summaries.
+*   **Structured Storage**: Dual-layer storage using **PostgreSQL**:
+    *   `scraped_data`: Stores raw web content.
+    *   `events`: Stores structured event details (title, location, score, etc.) with upsert logic.
+*   **Web UI**: A modern Flask-based dashboard to run extractions and visualize results.
+
+### Running the Project
+1.  **Environment Setup**:
+    *   Copy `.env.example` to `.env`.
+    *   Fill in `FIRECRAWL_API_KEY`, `GROQ_API_KEY`, and `DATABASE_URL`.
+2.  **Installation**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Run via CLI**:
+    ```bash
+    python main.py --urls https://example.com --mode scrape
+    ```
+4.  **Run via Web UI**:
+    ```bash
+    python app.py
+    ```
+
+### Project Structure
+*   `src/orchestrator.py`: Manages the "Store Raw -> Analyze -> Upsert Final" flow.
+*   `src/agents/`: specialized AI agents (Scout, Intelligence).
+*   `src/db/database.py`: PostgreSQL schema and operations.
+*   `templates/`: Web dashboard files.
