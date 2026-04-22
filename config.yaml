@@ -1,0 +1,304 @@
+# MuHive System-Wide Configuration
+
+# Blocklist for filtering
+blocklist:
+  words:
+    - sponsored
+    - advertisement
+    - giveaway
+    - crypto
+    - NFT
+    - casino
+    - "click here"
+    - "make money"
+    - "earn from home"
+  domains:
+    - scam-site.xyz
+    - spam.com
+
+# Interest Group Definitions
+interest_groups:
+  AI:
+    label: Artificial Intelligence
+    active: true
+    keywords:
+      - machine learning
+      - LLM
+      - deep learning
+      - neural network
+      - computer vision
+    categories:
+      - hackathon
+      - workshop
+      - internship
+      - research
+      - news
+  Cybersecurity:
+    label: Cybersecurity
+    active: true
+    keywords:
+      - CTF
+      - infosec
+      - ethical hacking
+      - penetration testing
+      - OSINT
+    categories:
+      - CTF
+      - workshop
+      - internship
+      - news
+  WebDev:
+    label: Web Development
+    active: true
+    keywords:
+      - React
+      - Node
+      - frontend
+      - backend
+      - API
+    categories:
+      - hackathon
+      - workshop
+      - internship
+      - news
+  DataScience:
+    label: Data Science
+    active: true
+    keywords:
+      - data science
+      - kaggle
+      - analytics
+      - pandas
+      - visualization
+    categories:
+      - competition
+      - workshop
+      - internship
+      - news
+  OpenSource:
+    label: Open Source
+    active: false
+    keywords:
+      - open source
+      - GSoC
+      - MLH
+      - contribution
+      - GitHub
+    categories:
+      - program
+      - internship
+      - event
+      - news
+
+# LLM Providers and Models
+models:
+  providers:
+    groq:
+      base_url: "https://api.groq.com/openai/v1"
+      api_key_env: "GROQ_API_KEY"
+      rpm: 30
+    openrouter:
+      base_url: "https://openrouter.ai/api/v1"
+      api_key_env: "OPENROUTER_API_KEY"
+      rpm: 10
+  roles:
+    verifier:
+      cheap:
+        provider: "groq"
+        model: "llama-3.1-8b-instant"
+        temperature: 0.1
+        max_tokens: 500
+      premium:
+        provider: "groq"
+        model: "llama-3.3-70b-versatile"
+        temperature: 0.1
+        max_tokens: 500
+      fallback:
+        provider: "openrouter"
+        model: "openai/gpt-oss-120b:free"
+        temperature: 0.1
+        max_tokens: 500
+    structurer:
+      cheap:
+        provider: "groq"
+        model: "llama-3.1-8b-instant"
+        temperature: 0.1
+        max_tokens: 500
+      premium:
+        provider: "groq"
+        model: "llama-3.3-70b-versatile"
+        temperature: 0.1
+        max_tokens: 500
+      fallback:
+        provider: "openrouter"
+        model: "openai/gpt-oss-120b:free"
+        temperature: 0.1
+        max_tokens: 500
+
+# Pipeline Settings
+pipeline:
+  max_concurrent_scrapers: 3
+  llm_rpm: 12
+  search_rpm: 5
+  min_verified_score: 0.5
+  seen_hashes_file: data/seen_hashes.json
+  circuit_state_file: data/circuit_state.json
+  retry_backoff_seconds: [1, 2, 4]
+  max_retries: 3
+  verifier_concurrency: 1
+  structurer_concurrency: 1
+  circuit_cooldown_seconds: 300
+  max_premium_items_per_run: 50
+  
+  ig_routing:
+    AI:
+      verifier: "cheap"
+      structurer: "cheap"
+    Cybersecurity:
+      verifier: "cheap"
+      structurer: "cheap"
+    default:
+      verifier: "cheap"
+      structurer: "cheap"
+
+  rate_limits:
+    groq:
+      max_rpm: 30
+    openrouter:
+      max_rpm: 10
+
+  search:
+    primary: "duckduckgo"
+    fallback: "tavily"
+
+  per_ig_limits:
+    AI:
+      max_verified: 20
+      max_structured: 20
+    default:
+      max_verified: 10
+      max_structured: 10
+
+# Data Sources
+sources:
+  global:
+    rss:
+      - url: https://hnrss.org/frontpage
+        label: Hacker News
+      - url: https://www.artificialintelligence-news.com/feed/
+        label: AI News
+      - url: https://www.wired.com/feed/category/business/artificial-intelligence/rss
+        label: Wired AI
+      - url: https://www.theverge.com/rss/index.xml
+        label: The Verge
+      - url: https://feeds.arstechnica.com/arstechnica/technology-lab
+        label: Ars Technica Lab
+      - url: https://techcrunch.com/tag/artificial-intelligence/feed/
+        label: TechCrunch AI
+      - url: https://www.zdnet.com/topic/artificial-intelligence/rss.xml
+        label: ZDNet AI
+    search:
+      - query: hackathon open registration 2026
+        label: General hackathons
+      - query: tech internship students 2026
+        label: General internships
+  interest_groups:
+    AI:
+      rss:
+        - url: https://arxiv.org/rss/cs.AI
+          label: ArXiv AI
+        - url: https://arxiv.org/rss/cs.LG
+          label: ArXiv ML
+        - url: https://news.mit.edu/rss/topic/artificial-intelligence
+          label: MIT AI News
+        - url: https://bair.berkeley.edu/blog/feed.xml
+          label: Berkeley AI Research
+        - url: https://deepmind.google/blog/rss.xml
+          label: DeepMind Blog
+        - url: https://openai.com/blog/rss.xml
+          label: OpenAI Blog
+        - url: https://huggingface.co/blog/feed.xml
+          label: Hugging Face Blog
+        - url: https://www.anthropic.com/news/rss
+          label: Anthropic News
+        - url: https://stability.ai/blog/rss
+          label: Stability AI Blog
+        - url: https://blogs.nvidia.com/blog/category/deep-learning/feed/
+          label: NVIDIA AI Blog
+        - url: https://news.google.com/rss/search?q=artificial+intelligence
+          label: Google News AI
+        - url: https://www.reddit.com/r/artificial/.rss
+          label: r/artificial
+        - url: https://www.reddit.com/r/MachineLearning/.rss
+          label: r/MachineLearning
+        - url: https://nitter.net/karpathy/rss
+          label: Andrej Karpathy (X)
+        - url: https://nitter.net/ylecun/rss
+          label: Yann LeCun (X)
+        - url: https://nitter.net/sama/rss
+          label: Sam Altman (X)
+      search:
+        - query: AI hackathon 2026 students
+          label: AI hackathons
+        - query: machine learning internship 2026
+          label: ML internships
+        - query: Artificial intelligence workshops 2026
+          label: AI workshops
+        - query: Artificial intelligence events 2026
+          label: AI events
+      sites:
+        - url: https://lablab.ai/event
+          label: LabLab AI events
+    Cybersecurity:
+      rss:
+        - url: https://feeds.feedburner.com/TheHackersNews
+          label: Hacker News Security
+      search:
+        - query: CTF competition 2026 open registration
+          label: CTF events
+        - query: cybersecurity internship 2026
+          label: Infosec internships
+      sites:
+        - url: https://ctftime.org/event/list/upcoming
+          label: CTFtime
+    WebDev:
+      rss:
+        - url: https://css-tricks.com/feed/
+          label: CSS Tricks
+      search:
+        - query: web development hackathon 2026
+          label: WebDev hackathons
+        - query: web development internships 2026
+          label: WebDev internships
+        - query: web development workshops 2026
+          label: WebDev workshops
+    DataScience:
+      search:
+        - query: kaggle competition 2026
+          label: Kaggle
+      sites:
+        - url: https://www.kaggle.com/competitions
+          label: Kaggle competitions
+    OpenSource:
+      rss:
+        - url: https://github.blog/feed/
+          label: GitHub blog
+      search:
+        - query: Google Summer of Code 2026
+          label: GSoC
+
+# Output Channels
+outputs:
+  console:
+    active: true
+    type: console
+    show_fields: [ig, category, deadline, score, title]
+  json_file:
+    active: true
+    type: json_file
+    path: data/results.json
+    pretty: true
+  csv_file:
+    active: false
+    type: csv_file
+    path: data/results.csv
