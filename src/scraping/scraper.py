@@ -17,9 +17,10 @@ import aiohttp
 from src.config.constants import (
     USER_AGENT, CONCURRENCY_LIMIT, SESSION_TIMEOUT,
     DEVFOLIO_API, DEVPOST_API, UNSTOP_API, HACKEREARTH_API,
+    IG_KEYWORDS, MASTER_IGS,
 )
 from src.scraping.data_cleaner import clean_events
-from src.scraping.curate import curate, IG_KEYWORDS, MASTER_IGS
+from src.scraping.curate import curate
 from src.db.data_schemas import Event
 
 
