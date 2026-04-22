@@ -1,13 +1,15 @@
 import asyncio
+import random
 from pydantic import BaseModel, Field
 from loguru import logger
 from src.llm import make_llm_client, get_limiter
 from src.retry import with_retry
 from src.config import load_config
 from src.state_manager import update_hashes_status
+from src.agent_config import AGENT_PROMPTS
 
 class Verification(BaseModel):
-    is_real: bool = Field(description="Is this a genuine tech opportunity?")
+    is_real: bool = Field(description="Is this a genuine tech opportunity or significant industry news?")
     is_relevant: bool = Field(description="Is this relevant to the specified Interest Group?")
     score: float = Field(description="Relevancy score from 0.0 to 1.0", ge=0, le=1)
     reason: str = Field(description="One sentence justification")
@@ -17,10 +19,15 @@ async def _verify_one(item, client, limiter, min_score):
     groups = load_config("interest_groups")
     ig_keywords = ", ".join(groups.get(item.ig, {}).get("keywords", []))
     
+    system_prompt = AGENT_PROMPTS["validater"].format(ig=item.ig, keywords=ig_keywords)
+    
     messages = [
-        {"role": "system", "content": f"You are a verifier for the {item.ig} Interest Group. Focus on keywords: {ig_keywords}."},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Title: {item.title}\nText: {item.text[:2000]}"}
     ]
+    
+    # Small random jitter to prevent burst TPM hits
+    await asyncio.sleep(random.uniform(0.5, 2.0))
     
     async with limiter:
         try:

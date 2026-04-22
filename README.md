@@ -1,15 +1,15 @@
-# 🐝 MuHive v1: High-Efficiency Discovery Engine
+# 🐝 MuHive v2: Modular Agentic Discovery Engine
 
-MuHive v1 is a production-grade, configuration-driven AI pipeline that autonomously discovers, verifies, and structures technical opportunities for student Interest Groups.
+MuHive v2 is a state-of-the-art, modular AI pipeline designed to autonomously discover, verify, and structure technical opportunities for student Interest Groups. It uses a multi-agent architecture to ensure high data quality and system resilience.
 
-## 🚀 The High-Efficiency Engine (v1)
-This version features a sophisticated modular architecture designed for maximum reliability and cost-efficiency, consolidating scraping techniques from all project branches into a unified, parallelized core.
+## 🚀 Key Features
 
-- **Tiered Model Routing**: Intelligently routes tasks to different AI "Brains" (e.g., Groq 70B for premium IGs, Llama 8B for general tasks) via `models.yaml`.
-- **Status-Aware Caching**: Uses a dictionary-based hash database (`seen_hashes.json`) to skip previously verified or structured items, reducing redundant LLM calls.
-- **Circuit Breaker & Fallbacks**: Detects provider outages (429/500) and automatically shifts to **OpenRouter** fallbacks with configurable cooldown periods.
-- **Parallelized Processing**: Uses `asyncio` semaphores to manage high-throughput processing while strictly respecting Free-Tier rate limits (RPM/TPM).
-- **Stealth & Resilience**: Mimics real browser behavior with randomized jitter and User-Agent rotation.
+- **Agentic Multi-Stage Pipeline**: Clear separation between Scraping, Classification, Validation, and Summarization agents.
+- **Tiered Model Routing**: Intelligently routes tasks to different AI models (e.g., Groq 70B for premium tasks, Llama 8B for general filtering).
+- **Consolidated Configuration**: All system settings, sources, and interest groups are managed through a single `config.yaml`.
+- **Status-Aware Caching**: Uses a hash database (`data/seen_hashes.json`) to deduplicate and track processing states.
+- **Circuit Breaker & Fallbacks**: Automatically detects provider outages and shifts to fallbacks with configurable cooldowns.
+- **Comprehensive Testing**: Built-in test suite covering every core component.
 
 ---
 
@@ -17,22 +17,21 @@ This version features a sophisticated modular architecture designed for maximum 
 
 ```text
 MuHive/
-├── main.py              # The Master Orchestrator
-├── config/              # ALL logic settings (No code changes needed!)
-│   ├── sources.yaml     # Scraper targets (RSS, Search, Sites)
-│   ├── groups.yaml      # Interest Group definitions & keywords
-│   ├── models.yaml      # Tiered Routing & LLM parameters
-│   └── settings.yaml    # Concurrency, Quotas, and Rate Limits
+├── config.yaml          # SINGLE source of truth for all configuration
+├── main.py              # Entry point for the orchestrator
+├── data/                # Persistent data (Hashes, Circuit states, Exports)
 ├── src/
-│   ├── pipeline/        # The Modular Stages (01-05)
-│   ├── config.py        # Centralized YAML & .env loader
-│   ├── llm_client.py    # Multi-brain client with rate limiting
-│   ├── state_manager.py # Hashing & Persistence logic
-│   └── [utils...]       # Focused helper modules (HTTP, Retry, Circuit)
-├── tests/               # Pytest Unit Suite & Diagnostic Scripts
-├── state/               # Persistent data (Hashes, Circuit states)
-├── output/              # Final processed data (JSON, CSV)
-└── .env.example         # Environment template
+│   ├── agents/          # Modular AI Agent personas (Classifier, Validater, Summarizer)
+│   ├── scraping/        # Specialized scrapers (RSS, Search, Site, API)
+│   ├── db/              # Database and Data Schema management
+│   ├── llm/             # LLM Client and provider abstractions
+│   ├── config/          # Configuration loader and constants
+│   ├── orchestrator.py  # Central coordinator for the pipeline
+│   ├── agent_config.py  # Agent-specific routing and personas
+│   └── [utils...]       # Focused helpers (HTTP, Retry, Circuit Breaker)
+├── tests/               # Full Pytest suite (Agents, Scrapers, Integration)
+├── scripts/             # Diagnostic and one-off developer scripts
+└── .env.example         # Template for required API keys
 ```
 
 ---
@@ -41,17 +40,17 @@ MuHive/
 
 ### 1. Installation
 ```bash
-# Recommended: Create a virtual environment first
-python -m venv .venv
+# Recommended: Use the existing virtual environment
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### 2. Configuration
-Copy the template and fill in your API keys:
+Copy the template and fill in your API keys (Groq, Together, NewsAPI, Tavily, etc.):
 ```bash
 cp .env.example .env
 ```
+Edit `config.yaml` to customize your Interest Groups and sources.
 
 ### 3. Execution
 ```bash
@@ -64,17 +63,18 @@ python main.py
 
 ---
 
-## 🧪 Testing & Maintenance
-
-- **Unit Tests**: Run the full test suite with `pytest tests/`.
-- **Status Reset**: To re-process items, run `rm state/seen_hashes.json`.
-- **Circuit State**: Check `state/circuit_state.json` to monitor current provider cooldowns.
-- **Hardening**: All rate limits and concurrency settings are controlled via `config/settings.yaml`.
+## 🧪 Testing
+The project includes a comprehensive test suite covering all features.
+```bash
+# Run all tests
+.venv/bin/pytest tests/
+```
 
 ## 🏆 Key Technologies
-- **Python 3.10+**: Core logic and Asyncio.
-- **Groq & OpenRouter**: Primary and fallback AI "Brains".
-- **Tavily**: Advanced search fallback.
-- **Pydantic**: Strict data validation & schema extraction.
-- **Trafilatura & BeautifulSoup**: Multi-layer content extraction.
-- **Tenacity**: Robust exponential backoff for network resilience.
+- **Python 3.12+**: Core logic and Asyncio.
+- **Groq & OpenRouter**: High-speed LLM inference.
+- **Tavily & DuckDuckGo**: Advanced search capabilities.
+- **Pydantic**: Robust data validation and schema handling.
+- **Trafilatura**: Professional-grade web content extraction.
+- **Tenacity**: resilient exponential backoff handling.
+- **Loguru**: Structured and beautiful logging.

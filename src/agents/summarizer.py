@@ -1,4 +1,5 @@
 import asyncio
+import random
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -8,6 +9,7 @@ from src.retry import with_retry
 from src.config import load_config
 from src.state_manager import update_hashes_status, get_hash
 from src.db.data_schemas import CleanItem
+from src.agent_config import AGENT_PROMPTS
 
 class Extraction(BaseModel):
     summary: str = Field(description="2-sentence summary")
@@ -20,10 +22,15 @@ async def _structure_one(entry, client, limiter):
     groups = load_config("interest_groups")
     categories = ", ".join(groups.get(item.ig, {}).get("categories", []))
     
+    system_prompt = AGENT_PROMPTS["summarizer"].format(ig=item.ig, categories=categories)
+    
     messages = [
-        {"role": "system", "content": f"Extract info for {item.ig}. Categories: {categories}. Summarize in 2 sentences. Specifically search for and extract any application or registration deadlines found in the text. Don't guess dates."},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Title: {item.title}\nText: {item.text[:3000]}"}
     ]
+    
+    # Small random jitter to prevent burst TPM hits
+    await asyncio.sleep(random.uniform(0.5, 2.0))
     
     async with limiter:
         try:

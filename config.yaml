@@ -138,24 +138,24 @@ models:
 # Pipeline Settings
 pipeline:
   max_concurrent_scrapers: 3
-  llm_rpm: 28
+  llm_rpm: 12
   search_rpm: 5
   min_verified_score: 0.5
   seen_hashes_file: data/seen_hashes.json
   circuit_state_file: data/circuit_state.json
   retry_backoff_seconds: [1, 2, 4]
   max_retries: 3
-  verifier_concurrency: 2
-  structurer_concurrency: 2
+  verifier_concurrency: 1
+  structurer_concurrency: 1
   circuit_cooldown_seconds: 300
   max_premium_items_per_run: 50
   
   ig_routing:
     AI:
-      verifier: "premium"
-      structurer: "premium"
+      verifier: "cheap"
+      structurer: "cheap"
     Cybersecurity:
-      verifier: "premium"
+      verifier: "cheap"
       structurer: "cheap"
     default:
       verifier: "cheap"
