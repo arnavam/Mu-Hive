@@ -1,39 +1,30 @@
-from datetime import datetime, timezone
-from pymongo import MongoClient
-from src.config.settings import MONGO_URI, MONGO_DB_NAME
+from src.db.schema import initialize_schema
+from src.db.repositories.scrape_repository import ScrapeRepository
+from src.db.repositories.event_repository import EventRepository
 
-class Database:
+class DatabaseFacade:
+    """
+    A unified interface for the database system.
+    This class coordinates schema initialization and delegates work to specific repositories.
+    """
     def __init__(self):
-        self.uri = MONGO_URI
-        self.db_name = MONGO_DB_NAME
-        self._client = None
-        self._db = None
+        # Automatically initialize schema on startup
+        initialize_schema()
+        self.scrapes = ScrapeRepository()
+        self.events = EventRepository()
 
-    @property
-    def client(self):
-        if self._client is None:
-            self._client = MongoClient(self.uri)
-        return self._client
+    # Backward compatibility methods for existing code
+    def save_scrape_result(self, url, data):
+        return self.scrapes.save(url, data)
 
-    @property
-    def db(self):
-        if self._db is None:
-            self._db = self.client[self.db_name]
-        return self._db
+    def get_scrape_result(self, record_id):
+        return self.scrapes.get_by_id(record_id)
 
-    def get_collection(self, name="scraped_data"):
-        return self.db[name]
+    def get_all_results(self):
+        return self.scrapes.get_all()
 
-    def save_scrape_result(self, url, mode, data, summary=None):
-        collection = self.get_collection()
-        doc = {
-            "url": url,
-            "mode": mode,
-            "data": data,
-            "summary": summary,
-            "created_at": datetime.now(timezone.utc)
-        }
-        return collection.insert_one(doc)
+    def upsert_event(self, event_data):
+        return self.events.upsert(event_data)
 
-# Singleton instance
-db = Database()
+# Singleton instance for the application
+db = DatabaseFacade()

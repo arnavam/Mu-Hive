@@ -50,5 +50,7 @@ Desktop.ini
 *.sublime-workspace
 
 # Scraped output files
+data/
+*.log
 backend/out.txt
 backend/out2.txt
