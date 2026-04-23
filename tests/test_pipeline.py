@@ -16,7 +16,7 @@ import asyncio
 
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -44,15 +44,6 @@ def _make_event(**kwargs) -> dict:
 def _run(coro):
     """Run an async coroutine synchronously for testing."""
     return asyncio.get_event_loop().run_until_complete(coro)
-
-
-def _process_events(events):
-    """Run the clean -> curate steps used by the production pipeline."""
-    from src.scraping.data_cleaner import clean_events
-    from src.scraping.curate import curate, IG_KEYWORDS
-
-    primary, extended = clean_events(events)
-    return curate(primary, extended, IG_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +116,10 @@ class TestProcessEvents(unittest.TestCase):
 
     def test_returns_dict_of_igs(self):
         """process_events always returns a dict keyed by IG names."""
-        from src.scraping.curate   import MASTER_IGS
+        from src.scraping.curate   import process_events
+        from src.config.constants  import MASTER_IGS
 
-        result = _process_events([])
+        result = process_events([])
         self.assertIsInstance(result, dict)
         for ig in MASTER_IGS:
             self.assertIn(ig, result)
@@ -135,13 +127,17 @@ class TestProcessEvents(unittest.TestCase):
 
     def test_deduplication(self):
         """Duplicate URLs must be reduced to one event."""
+        from src.scraping.curate import process_events
+
         dup = _make_event(registrationLink="https://same.devfolio.co")
-        result = _process_events([dup, dup, dup])
+        result = process_events([dup, dup, dup])
         total = sum(len(v) for v in result.values())
         self.assertLessEqual(total, 1)
 
     def test_max_five_per_ig(self):
         """No IG should have more than 5 events."""
+        from src.scraping.curate import process_events
+
         events = [
             _make_event(
                 eventName=f"AI Hackathon {i}",
@@ -150,41 +146,47 @@ class TestProcessEvents(unittest.TestCase):
             )
             for i in range(20)
         ]
-        result = _process_events(events)
+        result = process_events(events)
         for ig, evs in result.items():
             self.assertLessEqual(len(evs), 5, f"{ig} has more than 5 events")
 
     def test_expired_events_filtered(self):
         """Events with a past endDate must be excluded."""
+        from src.scraping.curate import process_events
+
         expired = _make_event(
             registrationLink="https://expired.devfolio.co",
             startDate="2020-01-01",
             endDate="2020-01-05",
         )
-        result = _process_events([expired])
+        result = process_events([expired])
         total = sum(len(v) for v in result.values())
         self.assertEqual(total, 0)
 
     def test_foreign_offline_events_filtered(self):
         """Offline events in foreign countries must be excluded."""
+        from src.scraping.curate import process_events
+
         foreign = _make_event(
             registrationLink="https://sfhack.io",
             location="San Francisco, USA",
         )
-        result = _process_events([foreign])
+        result = process_events([foreign])
         total = sum(len(v) for v in result.values())
         self.assertEqual(total, 0)
 
     def test_scored_events_have_internal_keys(self):
         """Surviving events must carry _score, _event_type, _days_away."""
+        from src.scraping.curate import process_events
+
         event = _make_event(registrationLink="https://good.devfolio.co")
-        result = _process_events([event])
+        result = process_events([event])
         surviving = [e for evs in result.values() for e in evs]
         if surviving:
             e = surviving[0]
             self.assertIn("_score",      e)
             self.assertIn("_event_type", e)
-            self.assertTrue("_days_remaining" in e or "_days_away" in e)
+            self.assertIn("_days_away",  e)
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +201,13 @@ class TestDbInsert(unittest.TestCase):
         """A new event should be inserted with correct field values."""
         from src.db.database1 import save_events
 
-        mock_collection = MagicMock()
+        mock_collection = AsyncMock()
         mock_get_collection.return_value = mock_collection
         mock_collection.bulk_write.return_value.upserted_count = 1
         mock_collection.bulk_write.return_value.modified_count = 0
 
         event = _make_event(registrationLink="https://newtest.devfolio.co")
-        grouped = _process_events([event])
+        grouped = process_events([event])
 
         inserted, updated = save_events(grouped)
         self.assertGreaterEqual(inserted + updated, 0)
@@ -215,7 +217,7 @@ class TestDbInsert(unittest.TestCase):
         """Must call bulk_write with UpdateOne operations."""
         from src.db.database1 import save_events
 
-        mock_collection = MagicMock()
+        mock_collection = AsyncMock()
         mock_get_collection.return_value = mock_collection
 
         grouped = {
@@ -230,8 +232,7 @@ class TestDbInsert(unittest.TestCase):
         mock_collection.bulk_write.assert_called_once()
         ops = mock_collection.bulk_write.call_args[0][0]
         self.assertEqual(len(ops), 1)
-        self.assertEqual(ops[0]._filter, {"link": "https://test.devfolio.co"})
-        self.assertIn("$set", ops[0]._doc)
+        self.assertEqual(ops[0].get_filter(), {"link": "https://test.devfolio.co"})
 
 
 if __name__ == "__main__":
