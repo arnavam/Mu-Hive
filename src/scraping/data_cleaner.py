@@ -1,12 +1,12 @@
 """
 src/scraping/data_cleaner.py
 ============================
-Strict pre-processing layer for weekly agent execution.
+Strict pre-processing layer for the scraper pipeline.
 
 Rules:
     1. Unstop URL deduplication/repair
     2. Location filter (Online/Virtual + Kerala offline only)
-    3. Monthly date window (0–30 days only)
+    3. Strict date window (0–10 days only)
     4. University-specific exclusion
 """
 
@@ -36,8 +36,8 @@ UNIVERSITY_SPECIFIC_KEYWORDS: list[str] = [
     "university challenge",
 ]
 
-# Strict window to 20 days
-RELAXED_WINDOW_DAYS: int = 20
+# Strict window to 10 days
+MAX_EVENT_WINDOW_DAYS: int = 10
 
 # Date parsing helpers
 _MONTHS = {
@@ -140,14 +140,14 @@ def get_days_remaining(event: dict) -> int | None:
 def is_valid_date(event: dict) -> bool:
     """
     NEVER allow past events.
-    Keep 0-20 days.
+    Keep 0-10 days.
     Reject TBA entirely.
     """
     days = get_days_remaining(event)
     if days is None:
         return False
     
-    return 0 <= days <= RELAXED_WINDOW_DAYS
+    return 0 <= days <= MAX_EVENT_WINDOW_DAYS
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Rule 4 — University-Specific Exclusion
@@ -189,15 +189,15 @@ def clean_events(events: list[dict], use_ai: bool = False):
     for event in events:
         # --- reject bad titles ---
         title = event.get("eventName", "").lower().strip()
-        if not title:
+        if not title or title in {"unknown", "tba", "n/a", "none"}:
             continue
         BAD_TITLES = ["test", "demo", "untitled", "sample"]
         if any(bad in title for bad in BAD_TITLES):
             continue
 
         # --- reject missing link ---
-        link = event.get("registrationLink", "")
-        if not link.strip():
+        link = str(event.get("registrationLink", "")).strip()
+        if not link:
             continue
 
         # --- repair url ---
@@ -223,17 +223,15 @@ def clean_events(events: list[dict], use_ai: bool = False):
         if days < 0:
             continue
 
-        # --- reject beyond 20 days always ---
-        if days > 20:
+        # --- reject beyond 10 days always ---
+        if days > MAX_EVENT_WINDOW_DAYS:
             continue
 
         event["days_remaining"] = days
+        event["_days_remaining"] = days
 
         # --- route to correct pool ---
-        if days <= 10:
-            primary.append(event)
-        else:
-            extended.append(event)   # 11–20 days
+        primary.append(event)
 
     print(f"[DataCleaner] primary={len(primary)}  extended={len(extended)}")
     return primary, extended
