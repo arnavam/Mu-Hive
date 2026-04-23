@@ -97,6 +97,14 @@ def save_events(grouped: dict):
     modified = 0
     for ig, events_list in grouped.items():
         for event in events_list:
+            # Convert Pydantic object to dict if necessary
+            if hasattr(event, 'model_dump'):
+                event = event.model_dump()
+            elif hasattr(event, 'dict'):
+                event = event.dict()
+            elif not isinstance(event, dict):
+                event = vars(event)
+                
             title = event.get('eventName', 'Unknown')
             link = event.get('registrationLink', '')
             if not link:
