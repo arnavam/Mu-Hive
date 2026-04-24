@@ -15,8 +15,11 @@ class CleanItem:
     deadline: str
 
 class ZulipWriter:
-    def __init__(self, zuliprc_path: str, stream: str):
-        self.client = zulip.Client(config_file=zuliprc_path)
+    def __init__(self, zuliprc_path: str = None, stream: str = "", email: str = None, api_key: str = None, site: str = None):
+        if email and api_key and site:
+            self.client = zulip.Client(email=email, api_key=api_key, site=site)
+        else:
+            self.client = zulip.Client(config_file=zuliprc_path)
         self.stream = stream
 
     def send_item(self, item: CleanItem, topic: str) -> dict:

@@ -14,6 +14,10 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Fix path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -35,13 +39,16 @@ from zulip_writer import ZulipWriter
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_zuliprc_path(ig_name: str) -> str:
-    """Returns the path to the .zuliprc file for a specific IG, or the default."""
-    slug = ig_name.lower().replace(" ", "_")
-    custom_path = Path.home() / f".zuliprc_{slug}"
-    if custom_path.exists():
-        return str(custom_path)
-    return str(Path.home() / ".zuliprc")
+def get_zulip_credentials(ig_name: str) -> dict:
+    """Retrieves Zulip credentials from environment variables."""
+    slug = ig_name.lower().replace(" ", "_").upper()
+    email = os.getenv(f"ZULIP_{slug}_EMAIL")
+    key = os.getenv(f"ZULIP_{slug}_KEY")
+    site = os.getenv(f"ZULIP_{slug}_SITE", "https://mulearn.zulipchat.com/")
+    
+    if email and key:
+        return {"email": email, "api_key": key, "site": site}
+    return None
 
 CHANNEL_MAP = {
     "Ai": "AI IG",
@@ -66,7 +73,9 @@ def format_date(date_str: str) -> str:
 
 async def process_with_advanced_llm(item: dict, ig_name: str, client) -> tuple[bool, str]:
     title = item.get('eventName', 'Unknown')
-    content = item.get('tags', [])
+    tags = item.get('tags', [])
+    summary_text = item.get('summary', '')
+    content = f"Tags: {tags}\nSummary: {summary_text}"
     
     try:
         # Step 1: Intelligence
@@ -107,9 +116,13 @@ async def main():
     grouped_events = curate(primary, extended, IG_KEYWORDS)
     
     for ig_name, zulip_channel in CHANNEL_MAP.items():
-        config_path = get_zuliprc_path(ig_name)
-        logger.info(f"🤖 Initializing bot for {ig_name} using {config_path}")
-        writer = ZulipWriter(config_path, "")
+        creds = get_zulip_credentials(ig_name)
+        if not creds:
+            logger.warning(f"⚠️ No credentials found in .env for {ig_name}. Skipping...")
+            continue
+            
+        logger.info(f"🤖 Initializing bot for {ig_name} using environment variables")
+        writer = ZulipWriter(email=creds['email'], api_key=creds['api_key'], site=creds['site'])
 
         items = grouped_events.get(ig_name, [])
         if not items: continue

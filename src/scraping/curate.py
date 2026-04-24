@@ -30,9 +30,12 @@ RARE_IGS = [
 
 def _normalized_matching_text(event):
   """Build normalized multi-field text for IG matching."""
+  tags = " ".join(event.get('tags', [])) if isinstance(event.get('tags'), list) else str(event.get('tags', ''))
   text = (
     f"{event.get('eventName', '')} "
     f"{event.get('description', '')} "
+    f"{event.get('summary', '')} "
+    f"{tags} "
     f"{event.get('platform', '')}"
   ).lower()
   return re.sub(r"[^a-z0-9+\s]", " ", text)

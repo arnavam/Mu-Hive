@@ -389,7 +389,12 @@ async def fetch_rss_feed(session, feed_url: str, category: str) -> list[dict]:
             feed = feedparser.parse(content)
             
             news_items = []
+            import time
             for entry in feed.entries[:3]:  # Limit to top 3 per feed for speed
+                # Try to get a sortable timestamp
+                published_parsed = entry.get("published_parsed")
+                timestamp = time.mktime(published_parsed) if published_parsed else 0
+                
                 news_items.append({
                     "eventName": entry.get("title", "Untitled News"),
                     "registrationLink": entry.get("link", ""),
@@ -398,7 +403,8 @@ async def fetch_rss_feed(session, feed_url: str, category: str) -> list[dict]:
                     "endDate": "N/A",
                     "tags": [category],
                     "platform": "RSS Feed",
-                    "_event_type": "News"
+                    "_event_type": "News",
+                    "_timestamp": timestamp
                 })
             return news_items
     except Exception:
