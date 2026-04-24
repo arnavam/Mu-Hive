@@ -13,6 +13,9 @@ happens here — this layer only fetches.
 
 import asyncio
 import aiohttp
+import feedparser
+import logging
+from src.config.sources import ALL_RSS_FEEDS
 
 from src.config.constants import (
     USER_AGENT, CONCURRENCY_LIMIT, SESSION_TIMEOUT,
@@ -375,3 +378,43 @@ async def run_scraper_pipeline() -> dict[str, list[Event]]:
 
     print(f"[Pipeline] Curation complete. Validated {total_valid} Pydantic event objects.")
     return final_output
+
+async def fetch_rss_feed(session, feed_url: str, category: str) -> list[dict]:
+    """Fetches and parses a single RSS feed."""
+    try:
+        async with session.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=15) as r:
+            if r.status != 200:
+                return []
+            content = await r.read()
+            feed = feedparser.parse(content)
+            
+            news_items = []
+            for entry in feed.entries[:3]:  # Limit to top 3 per feed for speed
+                news_items.append({
+                    "eventName": entry.get("title", "Untitled News"),
+                    "registrationLink": entry.get("link", ""),
+                    "summary": entry.get("summary", "")[:300],
+                    "startDate": entry.get("published", "Recent"),
+                    "endDate": "N/A",
+                    "tags": [category],
+                    "platform": "RSS Feed",
+                    "_event_type": "News"
+                })
+            return news_items
+    except Exception:
+        return []
+
+async def fetch_all_news() -> list[dict]:
+    """Fetches news from all configured RSS feeds."""
+    all_items = []
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for category, feeds in ALL_RSS_FEEDS.items():
+            for url in feeds:
+                tasks.append(fetch_rss_feed(session, url, category))
+        
+        results = await asyncio.gather(*tasks)
+        for sublist in results:
+            all_items.extend(sublist)
+            
+    return all_items

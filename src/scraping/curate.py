@@ -305,11 +305,11 @@ def curate(primary_events, extended_events, IG_KEYWORDS):
   for ig in MASTER_IGS:
     grouped[ig].sort(
       key=lambda x: (
-        x.get("days_remaining", 999),
         -x.get("_match_score", 0),
         -x.get("score", 0),
+        x.get("days_remaining", 999),
       )
     )
-    grouped[ig] = grouped[ig][:5]
+    grouped[ig] = grouped[ig][:15]
 
   return grouped

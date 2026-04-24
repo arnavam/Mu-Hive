@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from src.db.database import Database
-from src.llm.agent_config import model
+from src.config.agent_config import model
 
 logger = logging.getLogger(__name__)
 
