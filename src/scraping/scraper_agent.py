@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from readability import Document
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
-from src.db.database import Database
+from src.db.postgres_database import Database
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -211,9 +211,9 @@ async def run_rss_agent():
 
     SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
 
-    async def process_rss_feed(feed_url, browser):
+    async def process_rss_feed(feed_url, browser, ig_category):
         try:
-            logger.info(f"Fetching RSS: {feed_url}")
+            logger.info(f"Fetching RSS: {feed_url} [{ig_category}]")
             # feedparser fetches natively — works for all feeds without httpx
             feed = feedparser.parse(feed_url)
 
@@ -238,7 +238,7 @@ async def run_rss_agent():
                     if link in seen_urls:
                         continue
                     seen_urls.add(link)
-                    if db.link_exists(link, "RSS Feed"):
+                    if db.link_exists(link, ig_category):
                         logger.info(f"  [Skip] Already in DB: {link[:60]}")
                         continue
 
@@ -253,7 +253,7 @@ async def run_rss_agent():
                         logger.info(f"  [Fail] RSS item scrape failed: {link[:50]}")
                         continue
 
-                    doc_id = db.insert_event(title, link, "RSS Feed", "RSS", "scraped")
+                    doc_id = db.insert_event(title, link, ig_category, "RSS", "scraped")
                     if doc_id:
                         ok = db.update_event_scrape(
                             doc_id,
@@ -268,11 +268,15 @@ async def run_rss_agent():
         except Exception as e:
             logger.info(f"[RSS Error] {feed_url} -> {e}")
 
-    from src.config.sources import AI_RSS_FEEDS
+    from src.config.sources import ALL_RSS_FEEDS
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         logger.info("\n--- Scraping RSS Feeds ---")
-        await asyncio.gather(*[process_rss_feed(feed_url, browser) for feed_url in AI_RSS_FEEDS])
+        tasks = []
+        for ig_category, feeds in ALL_RSS_FEEDS.items():
+            for feed_url in feeds:
+                tasks.append(process_rss_feed(feed_url, browser, ig_category))
+        await asyncio.gather(*tasks)
         await browser.close()
 
     db.close()
