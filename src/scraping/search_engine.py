@@ -8,26 +8,28 @@ import requests
 import time
 import os 
 from dotenv import load_dotenv
-from src.db.database import Database
+from src.db.postgres_database import Database
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-def run_search_agent(keywords, categories, max_result=5):
+def run_search_agent(ig_mappings, categories, max_result=5):
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
     db = Database()
 
     logger.info("--------- Keyword Expansion -------------")
     search_queries = []
-    for keyword in keywords:
+    for keyword, ig_key in ig_mappings.items():
         for category in categories:
             query = f"{keyword} {category}"
-            search_queries.append(query)
+            search_queries.append({"query": query, "ig": ig_key})
             logger.info(f"- {query}")
 
     logger.info("\n--- Searching DuckDuckGo ---")
      
     ddgs = DDGS()
-    for query in search_queries:
+    for search_item in search_queries:
+        query = search_item["query"]
+        ig_key = search_item["ig"]
         logger.info(f"\nResults for '{query}':")
         try:
             results = []
@@ -65,8 +67,8 @@ def run_search_agent(keywords, categories, max_result=5):
                     logger.info(f"{i}. [{source_engine}] {title}")
                     logger.info(f"   Link: {link}")
                     
-                    if not db.link_exists(link, query):
-                        db.insert_event(title, link, query, source_engine, 'not processed')
+                    if not db.link_exists(link, ig_key):
+                        db.insert_event(title, link, ig_key, source_engine, 'not processed')
         except Exception as e:
             logger.info(f"   Error searching for '{query}': {e}")
         
@@ -113,11 +115,16 @@ def main():
     logger.info("Search agent started. Running search...")
     logger.info("Press Ctrl+C to exit.")
     
-    keywords = ["Artificial intelligence", "web development"]
+    # We map the search terms dynamically to the actual IG email groups
+    ig_mappings = {
+        "Artificial intelligence": "ai",
+        "web development": "web development",
+        "Data science": "data science"
+    }
     categories = ["internships", "Current news", "workshops", "events", "hackathons"]
     
     # Run the search agent immediately
-    run_search_agent(keywords, categories)
+    run_search_agent(ig_mappings, categories)
  
 if __name__ == "__main__":
     main()

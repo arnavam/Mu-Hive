@@ -1,7 +1,7 @@
 from src.scraping.search_engine import run_search_agent
 from src.scraping.scraper_agent import run_scraper_agent, run_rss_agent
 from src.scraping.scraper import run_scraper_pipeline
-from src.db.database import save_events
+from src.db.postgres_database import save_events
 import sys
 import asyncio
 import logging
@@ -52,13 +52,17 @@ def _print_results(grouped):
     print(f"{'═'*55}\n")
 
 async def main():
-    keywords = ["Artificial intelligence", "web development","Data science"]
+    ig_mappings = {
+        "Artificial intelligence": "ai",
+        "web development": "web development",
+        "Data science": "data science",
+    }
     categories = ["Current news"]
 
     logger.info("=" * 55)
     logger.info("  Extracting from SearchEngine")
     logger.info("=" * 55)
-    run_search_agent(keywords, categories)
+    run_search_agent(ig_mappings, categories)
 
     logger.info("=" * 55)
     logger.info("  Scraping SearchEngine Links")
