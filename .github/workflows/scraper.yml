@@ -26,5 +26,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run scraper
-        run: python -m tests.test_scraper
-        # After merge to main flow, update command to: python main.py
+        run: python main.py
