@@ -1,7 +1,7 @@
 import asyncio
 from src.agents.scout import scout
 from src.agents.intelligence import intelligence
-from src.db.database1 import db
+from src.db.database import db
 
 class Orchestrator:
     """
