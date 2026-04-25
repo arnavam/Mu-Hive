@@ -8,7 +8,7 @@ import requests
 import time
 import os 
 from dotenv import load_dotenv
-from src.db.postgres_database import Database
+from src.db.database import Database
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 

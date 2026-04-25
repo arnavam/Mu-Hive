@@ -1,7 +1,7 @@
 from src.scraping.search_engine import run_search_agent
 from src.scraping.scraper_agent import run_scraper_agent, run_rss_agent
 from src.scraping.scraper import run_scraper_pipeline
-from src.db.postgres_database import save_events
+from src.db.database import save_events
 import sys
 import asyncio
 import logging

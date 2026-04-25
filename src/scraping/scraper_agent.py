@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from readability import Document
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
-from src.db.postgres_database import Database
+from src.db.database import Database
 from dotenv import load_dotenv
 
 load_dotenv()
