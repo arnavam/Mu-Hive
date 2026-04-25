@@ -21,13 +21,12 @@ def initialize_schema():
                 CREATE TABLE IF NOT EXISTS events (
                     id SERIAL PRIMARY KEY,
                     title TEXT,
-                    type TEXT,
-                    platform TEXT,
-                    location TEXT,
-                    link TEXT UNIQUE,
-                    days_left INTEGER,
                     ig TEXT,
-                    score INTEGER,
+                    category TEXT,
+                    summary TEXT,
+                    apply_link TEXT UNIQUE,
+                    validity_score INTEGER,
+                    mail_sent BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );

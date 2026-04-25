@@ -56,9 +56,5 @@ class DatabaseFacade:
         # Postgres connection is persistent, ignore.
         pass
 
-
-
-
-
 # Singleton instance for the application
 db = DatabaseFacade()
