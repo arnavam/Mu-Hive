@@ -56,28 +56,9 @@ class DatabaseFacade:
         # Postgres connection is persistent, ignore.
         pass
 
-# MongoDB drop-in replacement naming
-Database = DatabaseFacade
 
-def save_events(grouped: dict):
-    db_obj = DatabaseFacade()
-    inserted, modified = 0, 0
-    for ig, events_list in grouped.items():
-        for event in events_list:
-            if hasattr(event, 'model_dump'): event = event.model_dump()
-            elif hasattr(event, 'dict'): event = event.dict()
-            elif not isinstance(event, dict): event = vars(event)
-            
-            title = event.get('eventName', 'Unknown')
-            link = event.get('registrationLink', '')
-            if not link: continue
-            
-            if not db_obj.link_exists(link, ig):
-                doc_id = db_obj.insert_event(title, link, ig, "eventslink_parser", "not processed")
-                if doc_id: inserted += 1
-            else:
-                modified += 1
-    return inserted, modified
+
+
 
 # Singleton instance for the application
 db = DatabaseFacade()

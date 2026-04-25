@@ -39,15 +39,8 @@ def initialize_schema():
                 );
             """)
 
-            # Automatically seed the ig_mails table with initial values
-            from src.config.ig_mails import IG_EMAILS
-            for ig, email in IG_EMAILS.items():
-                cur.execute("""
-                    INSERT INTO ig_mails (ig, email)
-                    VALUES (%s, %s)
-                    ON CONFLICT (ig) DO UPDATE SET email = EXCLUDED.email;
-                """, (ig, email))
-
         print("[+] Schema initialization complete.")
     except Exception as e:
         print(f"[!] Error initializing schema: {e}")
+
+

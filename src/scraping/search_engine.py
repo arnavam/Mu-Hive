@@ -8,16 +8,18 @@ import requests
 import time
 import os 
 from dotenv import load_dotenv
-from src.db.postgres_database import Database
+from src.db.postgres_database import DatabaseFacade
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
+#ig_mappings and categories are passed from the scraping_main.py file
+
 def run_search_agent(ig_mappings, categories, max_result=5):
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled search agent...")
-    db = Database()
+    db = DatabaseFacade()
 
     logger.info("--------- Keyword Expansion -------------")
-    search_queries = []
+    search_queries = []   #search_queries = [{"query": "keyword category", "ig": "ig_key"}]
     for keyword, ig_key in ig_mappings.items():
         for category in categories:
             query = f"{keyword} {category}"
@@ -36,7 +38,6 @@ def run_search_agent(ig_mappings, categories, max_result=5):
             source_engine = 'DuckDuckGo'
             
             try:
-                # Get top results for each expanded query via DuckDuckGo
                 # Setting safesearch='moderate' and timelimit='y' helps filter out obscure/spam domains.
                 results = list(ddgs.text(query, max_results=max_result, safesearch='moderate', timelimit='y'))
             except Exception as ddg_error:
@@ -67,16 +68,16 @@ def run_search_agent(ig_mappings, categories, max_result=5):
                     logger.info(f"{i}. [{source_engine}] {title}")
                     logger.info(f"   Link: {link}")
                     
+                    # Inserting by checking the link along with ig
                     if not db.link_exists(link, ig_key):
                         db.insert_event(title, link, ig_key, source_engine, 'not processed')
         except Exception as e:
             logger.info(f"   Error searching for '{query}': {e}")
         
-        # Small delay to avoid hitting rate limits too quickly
         time.sleep(1)
              
     db.close()
-
+ 
 # Searching using Tavily Search API
 def get_tavily_results(query, max_results=5):
     """Fetch results from Tavily Search API (fallback when DuckDuckGo fails)."""

@@ -1,5 +1,5 @@
 import logging
-from src.db.database import Database
+from src.db.postgres_database import DatabaseFacade as Database
 
 logger = logging.getLogger(__name__)
 

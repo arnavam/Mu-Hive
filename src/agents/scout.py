@@ -15,7 +15,7 @@ import requests
 from duckduckgo_search import DDGS
 import calendar
 
-from src.db.database import Database
+from src.db.postgres_database import DatabaseFacade as Database
 from src.config.sources import ALL_RSS_FEEDS
 
 logger = logging.getLogger(__name__)
