@@ -2,7 +2,6 @@
 """
 main.py
 =======
-The Entry Point for Mu-Hive (Johan's Part).
 Triggers the Zulip notification pipeline.
 """
 
