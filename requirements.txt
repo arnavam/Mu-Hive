@@ -52,3 +52,4 @@ psycopg2-binary
 python-dotenv
 firecrawl-py
 groq
+zulip>=0.8.3

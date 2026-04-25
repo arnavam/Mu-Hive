@@ -206,6 +206,11 @@ def clean_events(events: list[dict], use_ai: bool = False):
             event["registrationLink"] = fixed_link
             link = fixed_link
 
+        # --- ROUTING: News bypasses strict location/date filtering ---
+        if event.get("_event_type") == "News":
+            primary.append(event)
+            continue
+
         # --- location filter ---
         if not is_location_allowed(event.get("location", "")):
             continue
