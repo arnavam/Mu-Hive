@@ -17,7 +17,6 @@ from scripts.zulip_notify import run_zulip_notifications
 async def main():
     print("\n🌊 Mu-Hive Notification Agent Starting...")
     
-    # JOHAN'S PART: Send vetted data from DB to Zulip
     try:
         await run_zulip_notifications()
     except Exception as e:
