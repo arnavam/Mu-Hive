@@ -6,6 +6,7 @@ Triggers the Zulip notification pipeline.
 """
 
 from scripts.zulip_notify import run_zulip_notifications
+from scripts.gmailsender import run_email_agent
 import asyncio
 import sys
 import os
@@ -19,6 +20,7 @@ async def main():
     print("\n🌊 Mu-Hive Notification Agent Starting...")
 
     try:
+        run_email_agent()
         await run_zulip_notifications()
     except Exception as e:
         print(f"❌ Notification failed: {e}")
