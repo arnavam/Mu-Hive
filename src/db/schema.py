@@ -21,14 +21,12 @@ def initialize_schema():
                 CREATE TABLE IF NOT EXISTS events (
                     id SERIAL PRIMARY KEY,
                     title TEXT,
-                    summary TEXT,
-                    type TEXT,
-                    platform TEXT,
-                    location TEXT,
-                    link TEXT UNIQUE,
-                    days_left INTEGER,
                     ig TEXT,
-                    score INTEGER,
+                    category TEXT,
+                    summary TEXT,
+                    apply_link TEXT UNIQUE,
+                    validity_score INTEGER,
+                    mail_sent BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
@@ -40,21 +38,9 @@ def initialize_schema():
                 );
             """)
 
-            # Lightweight migration for older databases that predate summary.
-            cur.execute("""
-                ALTER TABLE events
-                ADD COLUMN IF NOT EXISTS summary TEXT;
-            """)
-
-            # Automatically seed the ig_mails table with initial values
-            from src.config.ig_mails import IG_EMAILS
-            for ig, email in IG_EMAILS.items():
-                cur.execute("""
-                    INSERT INTO ig_mails (ig, email)
-                    VALUES (%s, %s)
-                    ON CONFLICT (ig) DO UPDATE SET email = EXCLUDED.email;
-                """, (ig, email))
 
         print("[+] Schema initialization complete.")
     except Exception as e:
         print(f"[!] Error initializing schema: {e}")
+
+

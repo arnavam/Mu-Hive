@@ -16,7 +16,7 @@ def send_email(subject, body, receiver):
     message["From"]    = sender
     message["To"]      = receiver
     message["Subject"] = subject
-    message.attach(MIMEText(body, "plain"))
+    message.attach(MIMEText(body, "html"))
 
     receivers_list = [email.strip() for email in receiver.split(",")]
 
@@ -52,10 +52,10 @@ def run_email_agent():
             ig = record['ig']
             email = record['email']
 
-            # 2. Fetch scraped events for this specific IG
-            # Postgres: The JSON wrapper extracts 'summary' from the data column
+            # 2. Fetch structured events for this specific IG that haven't been emailed yet
+            # ORDER BY category groups all events of the same category together
             cursor.execute(
-                "SELECT id, data->>'summary' as summary FROM scraped_data WHERE ig = %s AND status = 'scraped'",
+                "SELECT id, category, summary, apply_link FROM events WHERE ig = %s AND mail_sent = FALSE ORDER BY category ASC",
                 (ig,)
             )
             events = cursor.fetchall()
@@ -64,12 +64,26 @@ def run_email_agent():
                 print(f"  [{ig}] No events, skipping.")
                 continue
 
-            # Join summaries together
-            body = "\n\n".join([str(e['summary']) for e in events if e['summary']])
+            # Join formatted HTML strings together
+            body_parts = []
+            for e in events:
+                cat = str(e['category'] or "General").strip()
+                summ = str(e['summary'] or "No summary provided.").replace("\n", "<br>").strip()
+                link = str(e['apply_link'] or "No link available.").strip()
+                
+                event_html = (
+                    f"<b>CATEGORY : {cat}</b><br><br>"
+                    f"{summ}<br><br>"
+                    f"Apply link: <a href='{link}'>{link}</a>"
+                )
+                body_parts.append(event_html)
+
+            # Separate multiple events using a professional horizontal rule
+            body = "<br><hr><br>".join(body_parts)
 
             # Send Email
             send_email(
-                subject=f"{ig.title()} Events Digest",
+                subject=f"{ig.title()} Digest",
                 body=body,
                 receiver=email
             )
@@ -78,7 +92,7 @@ def run_email_agent():
             event_ids = tuple([e['id'] for e in events])
             if event_ids:
                 cursor.execute(
-                    "UPDATE scraped_data SET status = 'mail sent' WHERE id IN %s",
+                    "UPDATE events SET mail_sent = TRUE WHERE id IN %s",
                     (event_ids,)
                 )
 

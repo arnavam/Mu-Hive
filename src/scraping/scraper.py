@@ -11,6 +11,7 @@ list of canonical event dicts (via normalize_event). No filtering or scoring
 happens here — this layer only fetches.
 """
 
+
 import asyncio
 import aiohttp
 import feedparser
@@ -25,7 +26,7 @@ from src.config.constants import (
 from src.scraping.data_cleaner import clean_events
 from src.scraping.curate import curate
 from src.db.data_schemas import Event
-
+from src.db.postgres_database import DatabaseFacade
 
 # ---------------------------------------------------------------------------
 # Canonical event shape
@@ -379,48 +380,64 @@ async def run_scraper_pipeline() -> dict[str, list[Event]]:
     print(f"[Pipeline] Curation complete. Validated {total_valid} Pydantic event objects.")
     return final_output
 
-async def fetch_rss_feed(session, feed_url: str, category: str) -> list[dict]:
-    """Fetches and parses a single RSS feed."""
-    try:
-        async with session.get(feed_url, headers={"User-Agent": USER_AGENT}, timeout=15) as r:
-            if r.status != 200:
-                return []
-            content = await r.read()
-            feed = feedparser.parse(content)
-            
-            news_items = []
-            import time
-            for entry in feed.entries[:3]:  # Limit to top 3 per feed for speed
-                # Try to get a sortable timestamp
-                published_parsed = entry.get("published_parsed")
-                timestamp = time.mktime(published_parsed) if published_parsed else 0
-                
-                news_items.append({
-                    "eventName": entry.get("title", "Untitled News"),
-                    "registrationLink": entry.get("link", ""),
-                    "summary": entry.get("summary", "")[:300],
-                    "startDate": entry.get("published", "Recent"),
-                    "endDate": "N/A",
-                    "tags": [category],
-                    "platform": "RSS Feed",
-                    "_event_type": "News",
-                    "_timestamp": timestamp
-                })
-            return news_items
-    except Exception:
-        return []
 
-async def fetch_all_news() -> list[dict]:
-    """Fetches news from all configured RSS feeds."""
-    all_items = []
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        for category, feeds in ALL_RSS_FEEDS.items():
-            for url in feeds:
-                tasks.append(fetch_rss_feed(session, url, category))
-        
-        results = await asyncio.gather(*tasks)
-        for sublist in results:
-            all_items.extend(sublist)
+def _print_results(grouped):
+    print("\n" + "═" * 55)
+    print("  🚀  Scraper Pipeline Data")
+    print("═" * 55)
+
+    active_count = 0
+    total_events = 0
+
+    for ig, events in grouped.items():
+        if not events:
+            continue
             
-    return all_items
+        active_count += 1
+        total_events += len(events)
+        
+        print(f"\n{'─'*55}")
+        print(f"  📌  {ig}  ({len(events)} events)")
+        print(f"{'─'*55}")
+        
+        for i, event in enumerate(events, 1):
+            if isinstance(event, dict):
+                title = event.get('eventName', 'Unknown')
+                days  = event.get('days_remaining', 0)
+                plat  = event.get('platform', 'Unknown')
+                link  = event.get('registrationLink', '')
+                loc   = event.get('location', 'Online')
+            else:
+                title = getattr(event, 'eventName', 'Unknown')
+                days  = getattr(event, 'days_remaining', 0)
+                plat  = getattr(event, 'platform', 'Unknown')
+                link  = getattr(event, 'registrationLink', '')
+                loc   = getattr(event, 'location', 'Online')
+            
+            print(f"\n  {i}. {title}")
+            print(f"     {days}d left │ {plat} │ {loc}")
+            print(f"     🔗 {link}")
+
+    print(f"\n{'═'*55}")
+    print(f"  ✅  {active_count} IGs active  │  {total_events} events")
+    print(f"{'═'*55}\n")
+
+def save_events(grouped: dict):
+    db_obj = DatabaseFacade()
+    inserted, modified = 0, 0
+    for ig, events_list in grouped.items():
+        for event in events_list:
+            if hasattr(event, 'model_dump'): event = event.model_dump()
+            elif hasattr(event, 'dict'): event = event.dict()
+            elif not isinstance(event, dict): event = vars(event)
+            
+            title = event.get('eventName', 'Unknown')
+            link = event.get('registrationLink', '')
+            if not link: continue
+            
+            if not db_obj.link_exists(link, ig):
+                doc_id = db_obj.insert_event(title, link, ig, "API", "not processed")
+                if doc_id: inserted += 1
+            else: 
+                modified += 1
+    return inserted, modified

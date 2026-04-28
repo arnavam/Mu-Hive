@@ -199,7 +199,7 @@ class TestDbInsert(unittest.TestCase):
     @patch("src.db.database.get_collection")
     def test_insert_new_event(self, mock_get_collection):
         """A new event should be inserted with correct field values."""
-        from src.db.database import save_events
+        from src.scraping.scraper import save_events
 
         mock_collection = AsyncMock()
         mock_get_collection.return_value = mock_collection
@@ -215,7 +215,7 @@ class TestDbInsert(unittest.TestCase):
     @patch("src.db.database.get_collection")
     def test_upsert_logic(self, mock_get_collection):
         """Must call bulk_write with UpdateOne operations."""
-        from src.db.database import save_events
+        from src.scraping.scraper import save_events
 
         mock_collection = AsyncMock()
         mock_get_collection.return_value = mock_collection

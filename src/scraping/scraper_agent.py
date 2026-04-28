@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from readability import Document
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
-from src.db.database import Database
+from src.db.postgres_database import DatabaseFacade
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,6 +32,8 @@ USER_AGENT   = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
  
  
 # ── Text extraction ───────────────────────────────────────────────────────────
+# Using trafilatura, readability and newspaper 
+
 def extract(html: str) -> str:
     """Run all extractors on HTML, return the longest result."""
     candidates = []
@@ -114,7 +116,7 @@ async def l2_playwright(url: str, browser) -> tuple | None:
         logger.info(f"    [L2:{url[:50]}] {e}"); return None
  
  
-# ── Core scrape (reusable) ────────────────────────────────────────────────────
+# ── Core scraping logic with structured output ────────────────────────────────────────────────────
 async def scrape_url(url: str, browser=None) -> dict | None:
     """
     Scrape a URL, returning full text.
@@ -146,9 +148,10 @@ async def scrape_url(url: str, browser=None) -> dict | None:
  
  
 # ── Pending-links scraper ─────────────────────────────────────────────────────
+#scraping links with status not processed 
 async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] scraper starting...")
-    db      = Database()
+    db      = DatabaseFacade()
     pending = db.find_pending_scrape(limit=limit)
 
     if not pending:
@@ -202,10 +205,10 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] scraper done.")
 
 
-# ── RSS Feed scraper ──────────────────────────────────────────────────────────
+ # ── RSS Feed scraper ──────────────────────────────────────────────────────────
 async def run_rss_agent():
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper starting...")
-    db        = Database()
+    db        = DatabaseFacade()
     seen_urls = set()
     semaphore = asyncio.Semaphore(5)
 
