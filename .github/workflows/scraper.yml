@@ -64,4 +64,4 @@ jobs:
           EOF
 
       - name: Run scraper
-        run: python main.py
+        run: uv run python main.py
