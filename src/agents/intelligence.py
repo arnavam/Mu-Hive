@@ -3,11 +3,13 @@ import time
 from typing import List, Literal
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+import asyncio
 
 from src.db.database import Database
 from src.config.agent_config import model
 
 logger = logging.getLogger(__name__)
+
 
 class OpportunityIntelligence(BaseModel):
     """Schema enforced by Pydantic AI for LLM structured output."""
@@ -70,6 +72,7 @@ _CYBER_KEYWORDS = {
     "hacker", "hacking", "cyberattack", "data theft", "pin", "atm fraud",
 }
 
+
 def _validate_tags(llm_tags: list, title: str, content: str, source_ig: list) -> list:
     """
     Post-LLM validation: cross-check LLM tags against content keywords
@@ -78,10 +81,10 @@ def _validate_tags(llm_tags: list, title: str, content: str, source_ig: list) ->
     title_lower = title.lower()
     content_lower = content[:2000].lower() if content else ""
     combined = title_lower + " " + content_lower
-    
+
     # Check if content is clearly cybersecurity
     is_clearly_cyber = any(kw in combined for kw in _CYBER_KEYWORDS)
-    
+
     if is_clearly_cyber:
         # If content is clearly cyber, remove AI/Data Science/Web Dev/UI-UX tags
         # unless original source also tagged it as those IGs
@@ -93,17 +96,18 @@ def _validate_tags(llm_tags: list, title: str, content: str, source_ig: list) ->
                 # Trust the source if it originally tagged this IG too
                 validated.append(tag)
             else:
-                logger.info(f"  -> Validation removed spurious tag '{tag}' (content is clearly Cyber Security)")
-        
+                logger.info(
+                    f"  -> Validation removed spurious tag '{tag}' (content is clearly Cyber Security)")
+
         # Ensure Cyber Security is in the list
         if "Cyber Security" not in validated:
             validated.append("Cyber Security")
         return validated
-    
+
     return llm_tags
 
 
-def run_intelligence(batch_limit=15):
+async def run_intelligence(batch_limit=15):
     """
     Evaluates and classifies unprocessed opportunities using the LLM.
     Processes up to batch_limit items per run to conserve API calls.
@@ -126,39 +130,44 @@ def run_intelligence(batch_limit=15):
         content = doc.get("scraped_full_text") or doc.get("summary", "")
         category = doc.get("category", "Unknown")
         source_ig = doc.get("ig_tags", [])
-        
+
         # Include source context so LLM can validate/reject initial classification
         prompt = (
             f"Title: {title}\n"
             f"Category: {category}\n"
-            f"Original IG Tags (from source — validate or override these): {source_ig}\n"
+            f"Original IG Tags (from source — validate or override these): {
+                source_ig}\n"
             f"Content: {content[:3000]}\n\n"
             f"Evaluate this content's relevance and quality. Classify into the correct Interest Groups."
         )
         logger.info(f"Evaluating ID {item_id}: {title[:60]}...")
 
         try:
-            result = intelligence_agent.run_sync(prompt)
+            result = await intelligence_agent.run(prompt)
             intelligence: OpportunityIntelligence = result.output
 
             final_score = intelligence.quality_score if intelligence.is_relevant else 0
-            
+
             # Post-LLM validation to catch misclassifications
-            validated_tags = _validate_tags(intelligence.ig_tags, title, content, source_ig)
-            
+            validated_tags = _validate_tags(
+                intelligence.ig_tags, title, content, source_ig)
+
             db.update_intelligence(item_id, final_score, validated_tags)
             processed_count += 1
-            logger.info(f"  -> Score: {final_score} | Tags: {validated_tags} | {intelligence.reasoning}")
+            logger.info(
+                f"  -> Score: {final_score} | Tags: {validated_tags} | {intelligence.reasoning}")
 
-            time.sleep(3)
+            await asyncio.sleep(3)
         except Exception as e:
-            logger.error(f"Intelligence processing failed for ID {item_id}: {e}")
+            logger.error(f"Intelligence processing failed for ID {
+                         item_id}: {e}")
             db.update_intelligence(item_id, 0, [])
 
     db.close()
-    logger.info(f"Intelligence Agent finished. Evaluated {processed_count}/{len(docs)} items.")
+    logger.info(f"Intelligence Agent finished. Evaluated {
+                processed_count}/{len(docs)} items.")
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    run_intelligence()
+    asyncio.run(run_intelligence())

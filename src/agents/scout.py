@@ -21,11 +21,11 @@ from src.config.sources import ALL_RSS_FEEDS
 logger = logging.getLogger(__name__)
 
 # --- Config for Scraper ---
-MIN_WORDS    = 120
+MIN_WORDS = 120
 SCRAPE_LIMIT = 50
-TIMEOUT      = 30
-PW_WAIT_MS   = 4000
-USER_AGENT   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+TIMEOUT = 30
+PW_WAIT_MS = 4000
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
 
 try:
     import warnings
@@ -97,6 +97,7 @@ def clean_html(html_content):
     soup = BeautifulSoup(html_content, "html.parser")
     return soup.get_text(separator=' ', strip=True)
 
+
 def run_rss_scout(db: Database):
     logger.info("Running RSS Scout...")
     new_count = 0
@@ -107,7 +108,8 @@ def run_rss_scout(db: Database):
                 if not feed.entries:
                     continue
                 for entry in feed.entries[:5]:
-                    pub_parsed = entry.get('published_parsed') or entry.get('updated_parsed')
+                    pub_parsed = entry.get(
+                        'published_parsed') or entry.get('updated_parsed')
                     if pub_parsed:
                         pub_time = calendar.timegm(pub_parsed)
                         if time.time() - pub_time > 86400:
@@ -119,7 +121,7 @@ def run_rss_scout(db: Database):
                     if not summary_raw and "content" in entry:
                         summary_raw = entry.content[0].value
                     summary = clean_html(summary_raw)
-                    
+
                     if title and link:
                         if db.insert_opportunity(title, link, summary, source_engine="RSS", ig_tags=[ig], category="News"):
                             new_count += 1
@@ -127,9 +129,11 @@ def run_rss_scout(db: Database):
                 logger.error(f"RSS error on {feed_url}: {e}")
     logger.info(f"RSS Scout inserted {new_count} new opportunities.")
 
+
 def get_tavily_results(query, max_results=3):
     api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key: return []
+    if not api_key:
+        return []
     try:
         response = requests.post("https://api.tavily.com/search", json={
             "query": query, "search_depth": "advanced", "max_results": max_results
@@ -138,10 +142,11 @@ def get_tavily_results(query, max_results=3):
     except:
         return []
 
+
 def run_search_agent(db: Database):
     """Search engine agent using curated, IG-specific queries for relevance."""
     logger.info("Running Search Engine Agent...")
-    
+
     ddgs = DDGS()
     SPAM_DOMAINS = [
         "bloguerosa.com", "qodsblog.com", "blogdeazar.com",
@@ -155,28 +160,33 @@ def run_search_agent(db: Database):
             for query in queries:
                 try:
                     try:
-                        results = list(ddgs.text(query, max_results=3, safesearch='moderate', timelimit='d'))
+                        results = list(
+                            ddgs.text(query, max_results=3, safesearch='moderate', timelimit='d'))
                         source = 'DuckDuckGo'
                     except Exception:
                         results = get_tavily_results(query, 3)
                         source = 'Tavily'
-                        
-                    if not results: continue
+
+                    if not results:
+                        continue
 
                     for result in results:
                         title = result.get('title', 'No Title')
                         link = result.get('href', result.get('url', ''))
-                        if not link: continue
+                        if not link:
+                            continue
                         if any(spam in link for spam in SPAM_DOMAINS) or link.endswith(('.xyz', '.info')):
                             continue
                         # Extract summary/snippet from search results
-                        summary = result.get('body', result.get('content', result.get('snippet', '')))
+                        summary = result.get('body', result.get(
+                            'content', result.get('snippet', '')))
                         if db.insert_opportunity(title, link, summary=summary, source_engine=source, ig_tags=[ig], category=category.capitalize()):
                             new_count += 1
                 except Exception as e:
                     logger.warning(f"Error searching '{query}': {e}")
                 time.sleep(1)
     logger.info(f"Search Engine inserted {new_count} new opportunities.")
+
 
 def extract(html: str) -> str:
     candidates = []
@@ -185,23 +195,26 @@ def extract(html: str) -> str:
     try:
         soup = BeautifulSoup(Document(html).summary(), "lxml")
         candidates.append(soup.get_text(" ", strip=True))
-    except Exception: pass
+    except Exception:
+        pass
     if HAS_NEWSPAPER:
         try:
-            art = NArticle(""); art.set_html(html); art.parse()
+            art = NArticle("")
+            art.set_html(html)
+            art.parse()
             candidates.append(art.text or "")
-        except Exception: pass
+        except Exception:
+            pass
     return max(candidates, key=lambda t: len(t.split()), default="")
 
 
-
 # --- HACKATHON APIs ---
-
 # API Endpoints
 DEVFOLIO_API = "https://api.devfolio.co/api/search/hackathons"
 UNSTOP_API = "https://unstop.com/api/public/opportunity/search-result"
-DEVPOST_API = "https://devpost.com/api/hackathons" 
+DEVPOST_API = "https://devpost.com/api/hackathons"
 HACKEREARTH_API = "https://www.hackerearth.com/api/events/upcoming/"
+
 
 def normalize_event(name, platform, link, start, end, tags, location="", prize="", cost="", elig=""):
     """Normalize a hackathon event, extracting tag names from dict-style tags."""
@@ -217,7 +230,7 @@ def normalize_event(name, platform, link, start, end, tags, location="", prize="
                     cleaned_tags.append(str(tag_name).strip())
             else:
                 cleaned_tags.append(str(t).strip())
-    
+
     # Strip HTML from prize pool (Devpost returns HTML-wrapped values)
     if prize:
         prize = clean_html(str(prize))
@@ -235,11 +248,12 @@ def normalize_event(name, platform, link, start, end, tags, location="", prize="
         "eligibility": str(elig).strip() if elig else "Students"
     }
 
+
 async def fetch_devfolio_page(session, semaphore, offset):
     events = []
     payload = {"from": offset, "size": 50, "query": {"match_all": {}}}
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    
+
     async with semaphore:
         try:
             async with session.post(DEVFOLIO_API, json=payload, headers=headers) as response:
@@ -255,33 +269,38 @@ async def fetch_devfolio_page(session, semaphore, offset):
                             start = src.get("starts_at", "TBA")
                             end = src.get("ends_at", "TBA")
                             tags = src.get("themes", [])
-                            loc = "Online" if src.get("is_online") else "In-Person"
-                            events.append(normalize_event(name, "Devfolio", link, start, end, tags, loc, "TBA", "Free", "Students"))
+                            loc = "Online" if src.get(
+                                "is_online") else "In-Person"
+                            events.append(normalize_event(
+                                name, "Devfolio", link, start, end, tags, loc, "TBA", "Free", "Students"))
                         except Exception:
                             continue
         except Exception as e:
             logger.warning(f"Devfolio page fetch error (offset {offset}): {e}")
     return events
 
+
 async def get_all_devfolio(session, semaphore):
     logger.info("Starting Devfolio API concurrent extraction...")
     offset = 0
     all_events = []
     while offset < 2500:
-        tasks = [fetch_devfolio_page(session, semaphore, o) for o in range(offset, offset + 250, 50)]
+        tasks = [fetch_devfolio_page(session, semaphore, o)
+                 for o in range(offset, offset + 250, 50)]
         results = await asyncio.gather(*tasks)
-        
+
         empty_page_found = False
         for res in results:
             if not res:
                 empty_page_found = True
             all_events.extend(res)
-            
+
         if empty_page_found:
             break
         offset += 250
     logger.info(f"Devfolio complete. Found {len(all_events)} events.")
     return all_events
+
 
 async def fetch_unstop_page(session, semaphore, page):
     events = []
@@ -297,38 +316,45 @@ async def fetch_unstop_page(session, semaphore, page):
                         try:
                             name = item.get("title", "")
                             seo = item.get("seo_url", "")
-                            link = f"https://unstop.com/hackathons/{seo}" if seo else ""
+                            link = f"https://unstop.com/hackathons/{
+                                seo}" if seo else ""
                             start = item.get("start_date", "TBA")
                             end = item.get("end_date", "TBA")
                             filters = item.get("filters", {})
-                            tags = [t.get("name") for t in filters] if isinstance(filters, list) else []
-                            cost = "Paid" if item.get("payment_type") == "paid" else "Free"
-                            events.append(normalize_event(name, "Unstop", link, start, end, tags, "Virtual/Online", "TBA", cost, "Students/College"))
+                            tags = [t.get("name") for t in filters] if isinstance(
+                                filters, list) else []
+                            cost = "Paid" if item.get(
+                                "payment_type") == "paid" else "Free"
+                            events.append(normalize_event(
+                                name, "Unstop", link, start, end, tags, "Virtual/Online", "TBA", cost, "Students/College"))
                         except Exception:
                             continue
         except Exception:
             pass
     return events
 
+
 async def get_all_unstop(session, semaphore):
     logger.info("Starting Unstop API concurrent extraction...")
     page = 1
     all_events = []
     while page < 50:
-        tasks = [fetch_unstop_page(session, semaphore, p) for p in range(page, page + 5)]
+        tasks = [fetch_unstop_page(session, semaphore, p)
+                 for p in range(page, page + 5)]
         results = await asyncio.gather(*tasks)
-        
+
         empty_page_found = False
         for res in results:
             if not res:
                 empty_page_found = True
             all_events.extend(res)
-            
+
         if empty_page_found:
             break
         page += 5
     logger.info(f"Unstop complete. Found {len(all_events)} events.")
     return all_events
+
 
 async def fetch_devpost_page(session, semaphore, page):
     events = []
@@ -349,12 +375,14 @@ async def fetch_devpost_page(session, semaphore, page):
                             tags = item.get("themes", [])
                             loc = item.get("location", "Online")
                             prize = item.get("prize_amount", "")
-                            events.append(normalize_event(name, "Devpost", link, start, end, tags, loc, prize, "Free", "Students/Global"))
+                            events.append(normalize_event(
+                                name, "Devpost", link, start, end, tags, loc, prize, "Free", "Students/Global"))
                         except Exception:
                             continue
         except Exception:
             pass
     return events
+
 
 async def get_all_devpost(session, semaphore):
     logger.info("Starting Devpost API concurrent extraction...")
@@ -362,20 +390,22 @@ async def get_all_devpost(session, semaphore):
     all_events = []
     while page < 50:
         # FIX: tasks variable was undefined — now properly creates page fetch tasks
-        tasks = [fetch_devpost_page(session, semaphore, p) for p in range(page, page + 5)]
+        tasks = [fetch_devpost_page(session, semaphore, p)
+                 for p in range(page, page + 5)]
         results = await asyncio.gather(*tasks)
-        
+
         empty_page_found = False
         for res in results:
             if not res:
                 empty_page_found = True
             all_events.extend(res)
-            
+
         if empty_page_found:
             break
         page += 5
     logger.info(f"Devpost complete. Found {len(all_events)} events.")
     return all_events
+
 
 async def fetch_hackerearth_page(session, semaphore, page):
     events = []
@@ -395,12 +425,14 @@ async def fetch_hackerearth_page(session, semaphore, page):
                             end = item.get("end_utc_tz", "TBA")
                             tags = item.get("tags", [])
                             loc = item.get("location", "Online")
-                            events.append(normalize_event(name, "HackerEarth", link, start, end, tags, loc, "TBA", "Free", "Open"))
+                            events.append(normalize_event(
+                                name, "HackerEarth", link, start, end, tags, loc, "TBA", "Free", "Open"))
                         except Exception:
                             continue
         except Exception:
             pass
     return events
+
 
 async def get_all_hackerearth(session, semaphore):
     logger.info("Starting HackerEarth API concurrent extraction...")
@@ -408,20 +440,22 @@ async def get_all_hackerearth(session, semaphore):
     all_events = []
     while page < 50:
         # FIX: tasks variable was undefined — now properly creates page fetch tasks
-        tasks = [fetch_hackerearth_page(session, semaphore, p) for p in range(page, page + 5)]
+        tasks = [fetch_hackerearth_page(session, semaphore, p)
+                 for p in range(page, page + 5)]
         results = await asyncio.gather(*tasks)
-        
+
         empty_page_found = False
         for res in results:
             if not res:
                 empty_page_found = True
             all_events.extend(res)
-            
+
         if empty_page_found:
             break
         page += 5
     logger.info(f"HackerEarth complete. Found {len(all_events)} events.")
     return all_events
+
 
 def map_hackathon_tags(tags):
     """
@@ -532,7 +566,8 @@ def _compute_tag_confidence_score(ig_tags, tags):
         "cybersecurity", "ethical hacking", "ctf", "penetration testing",
         "ui/ux", "ux design", "ui design", "figma", "product design",
     ]
-    match_count = sum(1 for tag in tags if any(k in str(tag).lower() for k in tag_map_keys))
+    match_count = sum(1 for tag in tags if any(
+        k in str(tag).lower() for k in tag_map_keys))
     return 7 if match_count >= 3 else 6
 
 
@@ -554,7 +589,7 @@ async def run_hackathon_apis(db: Database):
                 events.extend(res)
             elif isinstance(res, Exception):
                 logger.warning(f"Hackathon extraction error: {res}")
-                
+
     new_count = 0
     for ev in events:
         summary = (
@@ -568,16 +603,19 @@ async def run_hackathon_apis(db: Database):
             f"Tags: {', '.join(ev['tags'])}"
         )
         ig_tags = map_hackathon_tags(ev['tags'])
-        
+
         # Only insert if there is at least one mapped IG
         if ig_tags:
             score = _compute_tag_confidence_score(ig_tags, ev['tags'])
             if db.insert_opportunity(ev['eventName'], ev['registrationLink'], summary, source_engine=ev['platform'], ig_tags=ig_tags, category="Hackathons", is_processed=True, quality_score=score):
                 new_count += 1
-                
-    logger.info(f"Hackathon APIs inserted {new_count} new targeted opportunities.")
+
+    logger.info(f"Hackathon APIs inserted {
+                new_count} new targeted opportunities.")
 
 # -----------------------------
+
+
 async def l1_httpx(url: str):
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}) as c:
@@ -591,6 +629,7 @@ async def l1_httpx(url: str):
         return (text, title, meta) if len(text.split()) >= MIN_WORDS else None
     except Exception as e:
         return None
+
 
 async def l2_playwright(url: str, browser):
     try:
@@ -610,6 +649,7 @@ async def l2_playwright(url: str, browser):
     except Exception as e:
         return None
 
+
 async def run_scraper_agent(db: Database):
     logger.info("Running Scraper Layer...")
     pending = db.find_pending_scrape(limit=SCRAPE_LIMIT)
@@ -619,7 +659,7 @@ async def run_scraper_agent(db: Database):
 
     logger.info(f"{len(pending)} items pending scrape.")
     semaphore = asyncio.Semaphore(5)
-    
+
     async def scrape_one(doc, browser):
         async with semaphore:
             doc_id, link = doc["_id"], doc.get("link")
@@ -628,18 +668,21 @@ async def run_scraper_agent(db: Database):
             if not result:
                 result = await l2_playwright(link, browser)
                 label = "L2"
-                
+
             if result:
                 text, title, meta = result
-                db.update_event_scrape(doc_id, status="scraped", scraped_page_title=title, scraped_meta_description=meta, scraped_full_text=text, scrape_layer=label)
+                db.update_event_scrape(doc_id, status="scraped", scraped_page_title=title,
+                                       scraped_meta_description=meta, scraped_full_text=text, scrape_layer=label)
             else:
-                db.update_event_scrape(doc_id, status="scrape_failed", scrape_error="all layers failed")
-                
+                db.update_event_scrape(
+                    doc_id, status="scrape_failed", scrape_error="all layers failed")
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         await asyncio.gather(*[scrape_one(doc, browser) for doc in pending])
         await browser.close()
     logger.info("Scraper Layer finished.")
+
 
 async def run_scout_async():
     db = Database()
@@ -649,8 +692,10 @@ async def run_scout_async():
     await run_scraper_agent(db)
     db.close()
 
+
 def run_scout():
     asyncio.run(run_scout_async())
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

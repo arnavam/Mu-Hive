@@ -21,6 +21,7 @@ def initialize_schema():
                 CREATE TABLE IF NOT EXISTS events (
                     id SERIAL PRIMARY KEY,
                     title TEXT,
+                    summary TEXT,
                     type TEXT,
                     platform TEXT,
                     location TEXT,
@@ -37,6 +38,12 @@ def initialize_schema():
                     ig TEXT UNIQUE NOT NULL,
                     email TEXT NOT NULL
                 );
+            """)
+
+            # Lightweight migration for older databases that predate summary.
+            cur.execute("""
+                ALTER TABLE events
+                ADD COLUMN IF NOT EXISTS summary TEXT;
             """)
 
             # Automatically seed the ig_mails table with initial values

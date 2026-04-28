@@ -7,11 +7,14 @@ Triggers the Zulip notification pipeline.
 
 from scripts.zulip_notify import run_zulip_notifications
 from scripts.gmailsender import run_email_agent
+from src.orchestrator import run_pipeline
 import asyncio
+import logging
 import sys
 import os
 
-# Ensure scripts directory is in path
+logging.basicConfig(level=logging.INFO)
+
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), 'scripts')))
 
@@ -20,8 +23,10 @@ async def main():
     print("\n🌊 Mu-Hive Notification Agent Starting...")
 
     try:
-        run_email_agent()
-        await run_zulip_notifications()
+        await run_pipeline()
+
+        # run_email_agent()
+        # await run_zulip_notifications()
     except Exception as e:
         print(f"❌ Notification failed: {e}")
 

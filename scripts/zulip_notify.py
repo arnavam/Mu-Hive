@@ -20,7 +20,7 @@ load_dotenv()
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.db.database import db
-from zulip_writer import ZulipWriter
+from scripts.zulip_writer import ZulipWriter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

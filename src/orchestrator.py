@@ -1,5 +1,7 @@
 import logging
-from src.agents.scout import run_scout
+import asyncio
+from src.scraping.scraper import run_scraper_pipeline 
+from src.scraping.scraper_agent import run_rss_agent
 from src.agents.intelligence import run_intelligence
 from src.agents.communicator import run_communicator
 
@@ -8,7 +10,7 @@ logger = logging.getLogger(__name__)
 # --- Pipeline Configuration ---
 INTELLIGENCE_BATCH_LIMIT = 15
 
-def run_pipeline():
+async def run_pipeline():
     """Executes the full Mu-Hive intelligence pipeline sequentially.
     Each phase is error-isolated so failures don't block subsequent phases."""
     logger.info("=" * 50)
@@ -18,14 +20,15 @@ def run_pipeline():
     # Phase 1: Scout — Search & Scraping
     try:
         logger.info("Phase 1: Running Scout Agent (Search & Scraping)...")
-        run_scout()
+        await run_rss_agent()
+        await run_scraper_pipeline()
     except Exception as e:
         logger.error(f"Scout Agent failed: {e}. Continuing with existing data...")
 
     # Phase 2: Intelligence — LLM evaluation
     try:
         logger.info("Phase 2: Running Intelligence Agent (LLM evaluation)...")
-        run_intelligence(batch_limit=INTELLIGENCE_BATCH_LIMIT)
+        await run_intelligence(batch_limit=INTELLIGENCE_BATCH_LIMIT)
     except Exception as e:
         logger.error(f"Intelligence Agent failed: {e}. Continuing with existing scores...")
 
@@ -40,4 +43,4 @@ def run_pipeline():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    run_pipeline()
+    asyncio.run(run_pipeline())
