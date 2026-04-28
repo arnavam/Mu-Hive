@@ -2,11 +2,15 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+import logging
 import psycopg2
 from psycopg2.extras import DictCursor
 from dotenv import load_dotenv
+from src.config.logging_config import setup_logging
 
 load_dotenv()
+setup_logging()
+logger = logging.getLogger(__name__)
 
 def send_email(subject, body, receiver):
     sender   = os.getenv("GMAIL_SENDER")
@@ -24,16 +28,16 @@ def send_email(subject, body, receiver):
         server.starttls()
         server.login(sender, password)
         server.sendmail(sender, receivers_list, message.as_string())
-        print(f"  [Email] Sent to {receivers_list} for {subject}")
+        logger.info("Sent email to %s for %s", receivers_list, subject)
 
 def run_email_agent():
-    print(f"\n[Email Agent] Starting...")
+    logger.info("Email Agent starting...")
     
     # We fetch the exact Supabase string you placed in .env
     db_url = os.getenv("DATABASE_URL") 
     
     if not db_url:
-        print("[!] DATABASE_URL not found in .env. Checking local defaults...")
+        logger.warning("DATABASE_URL not found in .env. Checking local defaults...")
         db_url = "dbname=mu_hive user=postgres password=postgres host=localhost"
 
     try:
@@ -46,7 +50,7 @@ def run_email_agent():
         ig_email_records = cursor.fetchall()
 
         if not ig_email_records:
-            print("[Email Agent] No email mappings found in the 'ig_mails' table.")
+            logger.info("No email mappings found in the 'ig_mails' table.")
 
         for record in ig_email_records:
             ig = record['ig']
@@ -61,7 +65,7 @@ def run_email_agent():
             events = cursor.fetchall()
 
             if not events:
-                print(f"  [{ig}] No events, skipping.")
+                logger.info("[%s] No events, skipping.", ig)
                 continue
 
             # Join formatted HTML strings together
@@ -97,14 +101,14 @@ def run_email_agent():
                 )
 
     except Exception as e:
-        print(f"[Email Agent] PostgreSQL Error: {e}")
+        logger.error("Email Agent PostgreSQL error: %s", e)
     finally:
         if 'cursor' in locals(): 
             cursor.close()
         if 'conn' in locals(): 
             conn.close()
 
-    print("[Email Agent] Done.")
+    logger.info("Email Agent done.")
 
 if __name__ == "__main__":
     run_email_agent()

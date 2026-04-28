@@ -19,10 +19,11 @@ load_dotenv()
 # Fix path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.db.database import db
+from src.db.postgres_database import db
 from scripts.zulip_writer import ZulipWriter
+from src.config.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---

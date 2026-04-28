@@ -4,6 +4,8 @@ from src.scraping.scraper import run_scraper_pipeline
 from src.scraping.scraper_agent import run_rss_agent
 from src.agents.intelligence import run_intelligence
 from src.agents.communicator import run_communicator
+from src.db.orchestrator_writer import save_orchestrator_events
+from src.config.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,13 @@ async def run_pipeline():
     try:
         logger.info("Phase 1: Running Scout Agent (Search & Scraping)...")
         await run_rss_agent()
-        await run_scraper_pipeline()
+        grouped_events = await run_scraper_pipeline()
+        save_result = await asyncio.to_thread(save_orchestrator_events, grouped_events)
+        logger.info(
+            "Saved orchestrator output to DB: %s scraped entries, %s event rows.",
+            save_result["inserted_scraped"],
+            save_result["upserted_events"],
+        )
     except Exception as e:
         logger.error(f"Scout Agent failed: {e}. Continuing with existing data...")
 
@@ -42,5 +50,5 @@ async def run_pipeline():
     logger.info("Pipeline execution complete.")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
     asyncio.run(run_pipeline())

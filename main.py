@@ -8,12 +8,13 @@ Triggers the Zulip notification pipeline.
 from scripts.zulip_notify import run_zulip_notifications
 from scripts.gmailsender import run_email_agent
 from src.orchestrator import run_pipeline
+from src.config.logging_config import setup_logging
 import asyncio
 import logging
 import sys
 import os
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), 'scripts')))
@@ -25,8 +26,8 @@ async def main():
     try:
         await run_pipeline()
 
-        # run_email_agent()
-        # await run_zulip_notifications()
+        run_email_agent()
+        await run_zulip_notifications()
     except Exception as e:
         print(f"❌ Notification failed: {e}")
 

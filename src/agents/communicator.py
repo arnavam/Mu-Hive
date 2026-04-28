@@ -6,6 +6,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.columns import Columns
 from src.agents.planner import plan_digests
+from src.config.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -197,5 +198,5 @@ def run_communicator():
     ))
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
     run_communicator()

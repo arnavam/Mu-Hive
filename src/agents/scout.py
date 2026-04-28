@@ -17,6 +17,7 @@ import calendar
 
 from src.db.postgres_database import DatabaseFacade as Database
 from src.config.sources import ALL_RSS_FEEDS
+from src.config.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -698,5 +699,5 @@ def run_scout():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
     run_scout()

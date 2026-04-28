@@ -1,14 +1,27 @@
 import logging
 import time
-from typing import List, Literal
-from pydantic import BaseModel, Field
+from typing import List
+from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
 import asyncio
 
 from src.db.postgres_database import DatabaseFacade as Database
-from src.llm.agent_config import model
+from src.config.agent_config import model
+from src.config.logging_config import setup_logging
+from src.agents.planner import MVP_IGS
 
 logger = logging.getLogger(__name__)
+
+_VALID_IGS = set(MVP_IGS)
+_IG_NORMALIZATION = {
+    "ai": "AI",
+    "data science": "Data Science",
+    "web development": "Web Development",
+    "cyber security": "Cyber Security",
+    "cybersecurity": "Cyber Security",
+    "ui/ux": "UI/UX",
+    "ui ux": "UI/UX",
+}
 
 
 class OpportunityIntelligence(BaseModel):
@@ -23,9 +36,25 @@ class OpportunityIntelligence(BaseModel):
     reasoning: str = Field(
         description="A short 1-sentence explanation of the score."
     )
-    ig_tags: List[Literal["AI", "Data Science", "Web Development", "Cyber Security", "UI/UX"]] = Field(
-        description="Select the most relevant Interest Groups. Must select at least one if relevant."
+    ig_tags: List[str] = Field(
+        description=f"Select the most relevant Interest Groups from: {', '.join(MVP_IGS)}. Must select at least one if relevant."
     )
+
+    @field_validator("ig_tags")
+    @classmethod
+    def validate_ig_tags(cls, tags):
+        normalized_tags = []
+        seen = set()
+        for tag in tags or []:
+            normalized = _normalize_ig(tag)
+            if not normalized:
+                raise ValueError(
+                    f"Unsupported IG tag: {tag!r}. Allowed tags: {', '.join(MVP_IGS)}."
+                )
+            if normalized not in seen:
+                normalized_tags.append(normalized)
+                seen.add(normalized)
+        return normalized_tags
 
 
 INTELLIGENCE_SYSTEM_PROMPT = """\
@@ -64,47 +93,40 @@ intelligence_agent = Agent(
 )
 
 
-# Keywords that strongly indicate a specific IG — used for post-LLM validation
-_CYBER_KEYWORDS = {
-    "malware", "trojan", "ransomware", "phishing", "vulnerability", "exploit",
-    "cve-", "apt", "breach", "nfc attack", "botnet", "zero-day", "0day",
-    "backdoor", "infosec", "threat actor", "campaign", "stealing", "fraud",
-    "hacker", "hacking", "cyberattack", "data theft", "pin", "atm fraud",
-}
+def _normalize_ig(tag: str) -> str | None:
+    if not tag:
+        return None
+    canonical = _IG_NORMALIZATION.get(str(tag).strip().lower())
+    if canonical:
+        return canonical
+    stripped = str(tag).strip()
+    if stripped in _VALID_IGS:
+        return stripped
+    return None
 
 
-def _validate_tags(llm_tags: list, title: str, content: str, source_ig: list) -> list:
+def _validate_tags(llm_tags: list, source_ig: list) -> list:
     """
-    Post-LLM validation: cross-check LLM tags against content keywords
-    to catch obvious misclassifications (e.g., malware tagged as AI).
+    Ensure final tags stay in supported IGs and always include source_ig tags
+    from the database.
     """
-    title_lower = title.lower()
-    content_lower = content[:2000].lower() if content else ""
-    combined = title_lower + " " + content_lower
+    validated = []
+    seen = set()
 
-    # Check if content is clearly cybersecurity
-    is_clearly_cyber = any(kw in combined for kw in _CYBER_KEYWORDS)
+    for tag in llm_tags or []:
+        normalized = _normalize_ig(tag)
+        if normalized and normalized not in seen:
+            validated.append(normalized)
+            seen.add(normalized)
 
-    if is_clearly_cyber:
-        # If content is clearly cyber, remove AI/Data Science/Web Dev/UI-UX tags
-        # unless original source also tagged it as those IGs
-        validated = []
-        for tag in llm_tags:
-            if tag == "Cyber Security":
-                validated.append(tag)
-            elif tag in source_ig:
-                # Trust the source if it originally tagged this IG too
-                validated.append(tag)
-            else:
-                logger.info(
-                    f"  -> Validation removed spurious tag '{tag}' (content is clearly Cyber Security)")
+    for tag in source_ig or []:
+        normalized = _normalize_ig(tag)
+        if normalized and normalized not in seen:
+            logger.info("  -> Added source IG tag '%s' to model tags", normalized)
+            validated.append(normalized)
+            seen.add(normalized)
 
-        # Ensure Cyber Security is in the list
-        if "Cyber Security" not in validated:
-            validated.append("Cyber Security")
-        return validated
-
-    return llm_tags
+    return validated
 
 
 async def run_intelligence(batch_limit=15):
@@ -149,8 +171,7 @@ async def run_intelligence(batch_limit=15):
             final_score = intelligence.quality_score if intelligence.is_relevant else 0
 
             # Post-LLM validation to catch misclassifications
-            validated_tags = _validate_tags(
-                intelligence.ig_tags, title, content, source_ig)
+            validated_tags = _validate_tags(intelligence.ig_tags, source_ig)
 
             db.update_intelligence(item_id, final_score, validated_tags)
             processed_count += 1
@@ -169,5 +190,5 @@ async def run_intelligence(batch_limit=15):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
     asyncio.run(run_intelligence())
