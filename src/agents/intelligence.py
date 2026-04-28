@@ -157,8 +157,8 @@ async def run_intelligence(batch_limit=15):
         prompt = (
             f"Title: {title}\n"
             f"Category: {category}\n"
-            f"Original IG Tags (from source — validate or override these): {
-                source_ig}\n"
+            f'''Original IG Tags (from source — validate or override these): {
+                source_ig}\n'''
             f"Content: {content[:3000]}\n\n"
             f"Evaluate this content's relevance and quality. Classify into the correct Interest Groups."
         )
