@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from typing import List
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent
@@ -11,6 +12,8 @@ from src.config.logging_config import setup_logging
 from src.agents.planner import MVP_IGS
 
 logger = logging.getLogger(__name__)
+MAX_LLM_API_ERRORS_BEFORE_FAIL = 5
+HARD_FAIL_STATUS_CODES = {400, 429}
 
 _VALID_IGS = set(MVP_IGS)
 _IG_NORMALIZATION = {
@@ -55,6 +58,10 @@ class OpportunityIntelligence(BaseModel):
                 normalized_tags.append(normalized)
                 seen.add(normalized)
         return normalized_tags
+
+
+class LLMFailureThresholdExceeded(RuntimeError):
+    """Raised when too many hard LLM API failures occur in one run."""
 
 
 INTELLIGENCE_SYSTEM_PROMPT = """\
@@ -129,6 +136,33 @@ def _validate_tags(llm_tags: list, source_ig: list) -> list:
     return validated
 
 
+def _extract_status_code(exc: Exception) -> int | None:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+
+    response = getattr(exc, "response", None)
+    response_code = getattr(response, "status_code", None)
+    if isinstance(response_code, int):
+        return response_code
+
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None:
+        cause_status = getattr(cause, "status_code", None)
+        if isinstance(cause_status, int):
+            return cause_status
+        cause_response = getattr(cause, "response", None)
+        cause_response_code = getattr(cause_response, "status_code", None)
+        if isinstance(cause_response_code, int):
+            return cause_response_code
+
+    match = re.search(r"\b(400|429)\b", str(exc))
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
 async def run_intelligence(batch_limit=15):
     """
     Evaluates and classifies unprocessed opportunities using the LLM.
@@ -136,57 +170,76 @@ async def run_intelligence(batch_limit=15):
     """
     logger.info("Initializing Intelligence Agent (Evaluator + Classifier)...")
     db = Database()
+    hard_fail_count = 0
 
-    docs = db.get_unprocessed_for_intelligence(limit=batch_limit)
+    try:
+        docs = db.get_unprocessed_for_intelligence(limit=batch_limit)
 
-    if not docs:
-        logger.info("No new opportunities require evaluation.")
-        db.close()
-        return
+        if not docs:
+            logger.info("No new opportunities require evaluation.")
+            return
 
-    processed_count = 0
-    for doc in docs:
-        item_id = doc["_id"]
-        title = doc.get("title", "")
-        # Use full extracted text if available; otherwise fallback to summary
-        content = doc.get("scraped_full_text") or doc.get("summary", "")
-        category = doc.get("category", "Unknown")
-        source_ig = doc.get("ig_tags", [])
+        processed_count = 0
+        for doc in docs:
+            item_id = doc["_id"]
+            title = doc.get("title", "")
+            # Use full extracted text if available; otherwise fallback to summary
+            content = doc.get("scraped_full_text") or doc.get("summary", "")
+            category = doc.get("category", "Unknown")
+            source_ig = doc.get("ig_tags", [])
 
-        # Include source context so LLM can validate/reject initial classification
-        prompt = (
-            f"Title: {title}\n"
-            f"Category: {category}\n"
-            f'''Original IG Tags (from source — validate or override these): {
-                source_ig}\n'''
-            f"Content: {content[:3000]}\n\n"
-            f"Evaluate this content's relevance and quality. Classify into the correct Interest Groups."
+            # Include source context so LLM can validate/reject initial classification
+            prompt = (
+                f"Title: {title}\n"
+                f"Category: {category}\n"
+                f"Original IG Tags (from source — validate or override these): {source_ig}\n"
+                f"Content: {content[:3000]}\n\n"
+                "Evaluate this content's relevance and quality. "
+                "Classify into the correct Interest Groups."
+            )
+            logger.info(f"Evaluating ID {item_id}: {title[:60]}...")
+
+            try:
+                result = await intelligence_agent.run(prompt)
+                intelligence: OpportunityIntelligence = result.output
+
+                final_score = intelligence.quality_score if intelligence.is_relevant else 0
+
+                # Post-LLM validation to catch misclassifications
+                validated_tags = _validate_tags(intelligence.ig_tags, source_ig)
+
+                db.update_intelligence(item_id, final_score, validated_tags)
+                processed_count += 1
+                logger.info(
+                    f"  -> Score: {final_score} | Tags: {validated_tags} | {intelligence.reasoning}"
+                )
+
+                await asyncio.sleep(3)
+            except Exception as e:
+                status_code = _extract_status_code(e)
+                if status_code in HARD_FAIL_STATUS_CODES:
+                    hard_fail_count += 1
+                    logger.error(
+                        "Hard LLM API error for ID %s (HTTP %s). Count=%s/%s.",
+                        item_id,
+                        status_code,
+                        hard_fail_count,
+                        MAX_LLM_API_ERRORS_BEFORE_FAIL,
+                    )
+                    if hard_fail_count > MAX_LLM_API_ERRORS_BEFORE_FAIL:
+                        raise LLMFailureThresholdExceeded(
+                            "LLM API failure threshold exceeded: "
+                            f"{hard_fail_count} HTTP 400/429 errors in one run."
+                        ) from e
+
+                logger.error(f"Intelligence processing failed for ID {item_id}: {e}")
+                db.update_intelligence(item_id, 0, [])
+
+        logger.info(
+            f"Intelligence Agent finished. Evaluated {processed_count}/{len(docs)} items."
         )
-        logger.info(f"Evaluating ID {item_id}: {title[:60]}...")
-
-        try:
-            result = await intelligence_agent.run(prompt)
-            intelligence: OpportunityIntelligence = result.output
-
-            final_score = intelligence.quality_score if intelligence.is_relevant else 0
-
-            # Post-LLM validation to catch misclassifications
-            validated_tags = _validate_tags(intelligence.ig_tags, source_ig)
-
-            db.update_intelligence(item_id, final_score, validated_tags)
-            processed_count += 1
-            logger.info(
-                f"  -> Score: {final_score} | Tags: {validated_tags} | {intelligence.reasoning}")
-
-            await asyncio.sleep(3)
-        except Exception as e:
-            logger.error(f"Intelligence processing failed for ID {
-                         item_id}: {e}")
-            db.update_intelligence(item_id, 0, [])
-
-    db.close()
-    logger.info(f"Intelligence Agent finished. Evaluated {
-                processed_count}/{len(docs)} items.")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

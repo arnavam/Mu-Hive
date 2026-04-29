@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Install Playwright browsers
+        run: uv run playwright install --with-deps chromium
+
       # 🔍 Debug step (IMPORTANT — remove later if you want)
       - name: Verify environment variables
         run: |

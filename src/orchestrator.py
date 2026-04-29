@@ -2,7 +2,7 @@ import logging
 import asyncio
 from src.scraping.scraper import run_scraper_pipeline 
 from src.scraping.scraper_agent import run_rss_agent
-from src.agents.intelligence import run_intelligence
+from src.agents.intelligence import run_intelligence, LLMFailureThresholdExceeded
 from src.agents.communicator import run_communicator
 from src.db.orchestrator_writer import save_orchestrator_events
 from src.config.logging_config import setup_logging
@@ -37,6 +37,9 @@ async def run_pipeline():
     try:
         logger.info("Phase 2: Running Intelligence Agent (LLM evaluation)...")
         await run_intelligence(batch_limit=INTELLIGENCE_BATCH_LIMIT)
+    except LLMFailureThresholdExceeded as e:
+        logger.error(f"Intelligence Agent hard-failed: {e}. Aborting pipeline.")
+        raise
     except Exception as e:
         logger.error(f"Intelligence Agent failed: {e}. Continuing with existing scores...")
 
