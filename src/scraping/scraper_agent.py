@@ -32,6 +32,24 @@ MAX_IMAGES   = 5       # max images extracted (URLs only)
 USER_AGENT   = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
 feedparser.USER_AGENT = USER_AGENT
+
+# Some publishers reject browser user agents on their feed endpoints while
+# allowing feed readers (e.g. kdnuggets.com). Retry once with a reader UA.
+FEED_READER_UA = "feedparser/6.0 (+https://github.com/kurtmckee/feedparser)"
+RSS_BLOCKED_STATUS = {401, 403, 406, 429}
+
+
+async def fetch_feed_bytes(client, url: str) -> bytes:
+    """Fetch a feed, retrying with a feed-reader UA when blocked as a browser."""
+    response = await client.get(url)
+    if response.status_code in RSS_BLOCKED_STATUS:
+        logger.info(
+            f"[RSS] {url} -> HTTP {response.status_code}; "
+            "retrying with feed-reader user agent"
+        )
+        response = await client.get(url, headers={"User-Agent": FEED_READER_UA})
+    response.raise_for_status()
+    return response.content
  
  
 # ── Text extraction ───────────────────────────────────────────────────────────
@@ -295,9 +313,7 @@ async def run_rss_agent():
             logger.info(f"Fetching RSS: {feed_url} [{', '.join(ig_categories)}]")
             async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
                                          headers={"User-Agent": USER_AGENT}) as client:
-                r = await client.get(feed_url)
-                r.raise_for_status()
-                feed_data = r.content
+                feed_data = await fetch_feed_bytes(client, feed_url)
 
             feed = feedparser.parse(feed_data)
             stats["feeds_processed"] += 1

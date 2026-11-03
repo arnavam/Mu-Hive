@@ -356,6 +356,7 @@ class TestRssMultiIg(unittest.TestCase):
 
             async def get(self, url):
                 return SimpleNamespace(
+                    status_code=200,
                     raise_for_status=lambda: None,
                     content=b"<rss/>",
                 )
@@ -403,6 +404,50 @@ class TestRssMultiIg(unittest.TestCase):
             call.args[2] for call in mock_db.scrapes.insert_queue.call_args_list
         )
         self.assertEqual(inserted_igs, ["AI", "UI/UX"])
+
+
+class TestRssUserAgentFallback(unittest.TestCase):
+    """Feed endpoints that block browsers must retry with a reader UA."""
+
+    class _Response:
+        def __init__(self, status, content=b"<rss/>"):
+            self.status_code = status
+            self.content = content
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+    def test_retries_with_feed_reader_ua_on_403(self):
+        from src.scraping.scraper_agent import FEED_READER_UA, fetch_feed_bytes
+
+        calls = []
+
+        class FakeClient:
+            async def get(self, url, headers=None):
+                calls.append(headers)
+                return TestRssUserAgentFallback._Response(
+                    403 if headers is None else 200
+                )
+
+        data = _run(fetch_feed_bytes(FakeClient(), "https://example.com/feed"))
+
+        self.assertEqual(data, b"<rss/>")
+        self.assertIsNone(calls[0])
+        self.assertEqual(calls[1], {"User-Agent": FEED_READER_UA})
+
+    def test_does_not_retry_on_success(self):
+        from src.scraping.scraper_agent import fetch_feed_bytes
+
+        calls = []
+
+        class FakeClient:
+            async def get(self, url, headers=None):
+                calls.append(headers)
+                return TestRssUserAgentFallback._Response(200)
+
+        _run(fetch_feed_bytes(FakeClient(), "https://example.com/feed"))
+        self.assertEqual(calls, [None])
 
 
 class TestGmailQueryShape(unittest.TestCase):

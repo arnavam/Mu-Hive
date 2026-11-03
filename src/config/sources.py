@@ -114,11 +114,12 @@ DATA_ANALYTICS_RSS_FEEDS = [
 DSA_RSS_FEEDS = [
     "https://dev.to/feed/tag/algorithms",                  # DEV — algorithms
     "https://dev.to/feed/tag/leetcode",                    # DEV — LeetCode practice
+    "https://dev.to/feed/tag/dsa",                         # DEV — DSA fundamentals
     "https://medium.com/feed/tag/competitive-programming", # Medium — competitive programming
     "https://medium.com/feed/tag/algorithms",              # Medium — algorithms
     "https://medium.com/feed/tag/data-structures",         # Medium — data structures
+    "https://medium.com/feed/tag/leetcode",                # Medium — LeetCode solutions
     "https://www.hackerrank.com/blog/feed/",               # HackerRank — problem solving
-    "https://www.reddit.com/r/algorithms/.rss",            # r/algorithms — community discussion
     "https://www.codingninjas.com/blog/feed/",             # Coding Ninjas — DSA tutorials
 ]
 
