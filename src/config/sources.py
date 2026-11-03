@@ -85,12 +85,84 @@ DATA_SCIENCE_RSS_FEEDS = [
     "https://neptune.ai/blog/feed",                # Neptune.ai — MLOps & experiment tracking
 ]
 
+DEVOPS_RSS_FEEDS = [
+    "https://kubernetes.io/feed.xml",              # Kubernetes — orchestration & platform
+    "https://aws.amazon.com/blogs/devops/feed/",   # AWS DevOps — CI/CD & cloud delivery
+    "https://thenewstack.io/feed/",                # The New Stack — cloud native & platform eng
+    "https://www.hashicorp.com/blog/feed.xml",     # HashiCorp — Terraform, Vault, IaC
+    "https://www.redhat.com/en/rss/blog",          # Red Hat — Linux, OpenShift, automation
+    "https://stackoverflow.blog/feed/",            # Stack Overflow — engineering practice
+    "https://www.infoq.com/feed/",                 # InfoQ — architecture & DevOps reporting
+]
+
+GAME_DEV_RSS_FEEDS = [
+    "https://www.gamedeveloper.com/rss.xml",       # Game Developer (Gamasutra successor)
+    "https://80.lv/feed/",                         # 80 Level — art, tech & production
+    "https://unity.com/blog/feed",                 # Unity Blog — engine & tooling
+    "https://www.gamesindustry.biz/feed",          # GamesIndustry.biz — industry news
+    "https://www.pocketgamer.biz/rss/",            # PocketGamer.biz — mobile games market
+    "https://gamedevjs.com/feed/",                 # Gamedev.js — web/HTML5 game dev
+]
+
+DATA_ANALYTICS_RSS_FEEDS = [
+    "https://www.analyticsvidhya.com/feed/",               # Analytics Vidhya — analytics practice
+    "https://powerbi.microsoft.com/en-us/blog/feed/",      # Power BI — BI platform updates
+    "https://www.kdnuggets.com/feed",                      # KDnuggets — analytics & data mining
+    "https://www.datamation.com/feed/",                    # Datamation — enterprise analytics
+]
+
+DSA_RSS_FEEDS = [
+    "https://dev.to/feed/tag/algorithms",                  # DEV — algorithms
+    "https://dev.to/feed/tag/leetcode",                    # DEV — LeetCode practice
+    "https://medium.com/feed/tag/competitive-programming", # Medium — competitive programming
+    "https://medium.com/feed/tag/algorithms",              # Medium — algorithms
+    "https://medium.com/feed/tag/data-structures",         # Medium — data structures
+    "https://www.hackerrank.com/blog/feed/",               # HackerRank — problem solving
+    "https://www.reddit.com/r/algorithms/.rss",            # r/algorithms — community discussion
+    "https://www.codingninjas.com/blog/feed/",             # Coding Ninjas — DSA tutorials
+]
+
+BLOCKCHAIN_RSS_FEEDS = [
+    "https://cointelegraph.com/rss",                        # Cointelegraph — market & tech news
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",      # CoinDesk — industry reporting
+    "https://decrypt.co/feed",                             # Decrypt — Web3 & crypto news
+    "https://blog.ethereum.org/feed.xml",                  # Ethereum Foundation — protocol updates
+    "https://www.theblock.co/rss.xml",                     # The Block — institutional crypto
+    "https://cryptoslate.com/feed/",                       # CryptoSlate — market analysis
+    "https://bitcoinmagazine.com/.rss/full/",              # Bitcoin Magazine — Bitcoin ecosystem
+]
+
+QUANTUM_RSS_FEEDS = [
+    "https://quantumcomputingreport.com/feed/",            # Quantum Computing Report — industry
+    "https://thequantuminsider.com/feed/",                 # The Quantum Insider — ecosystem news
+    "https://www.nature.com/npjqi.rss",                    # npj Quantum Information — research
+    "https://www.sciencedaily.com/rss/computers_math/quantum_computers.xml",  # ScienceDaily
+    "https://www.nextplatform.com/feed/",                  # The Next Platform — HPC & quantum
+]
+
+IOT_ROBOTICS_RSS_FEEDS = [
+    "https://www.therobotreport.com/feed/",                # The Robot Report — robotics industry
+    "https://spectrum.ieee.org/feeds/topic/robotics.rss",  # IEEE Spectrum — robotics research
+    "https://hackaday.com/feed/",                          # Hackaday — hardware & embedded builds
+    "https://www.raspberrypi.com/news/feed/",              # Raspberry Pi — SBC & maker projects
+    "https://www.roboticsbusinessreview.com/feed/",        # Robotics Business Review
+    "https://iot-analytics.com/feed/",                     # IoT Analytics — market research
+    "https://spectrum.ieee.org/feeds/topic/consumer-electronics.rss",  # IEEE Spectrum — devices
+]
+
 ALL_RSS_FEEDS = {
     "AI": AI_RSS_FEEDS,
     "Web Development": WEB_DEV_RSS_FEEDS,
     "UI/UX": UI_UX_RSS_FEEDS,
     "Cyber Security": CYBER_SEC_RSS_FEEDS,
     "Data Science": DATA_SCIENCE_RSS_FEEDS,
+    "Devops": DEVOPS_RSS_FEEDS,
+    "Game Dev": GAME_DEV_RSS_FEEDS,
+    "Data Analytics": DATA_ANALYTICS_RSS_FEEDS,
+    "Data Structures and Algorithm": DSA_RSS_FEEDS,
+    "Blockchain": BLOCKCHAIN_RSS_FEEDS,
+    "Quantum Computing": QUANTUM_RSS_FEEDS,
+    "Internet Of Things (IOT) And Robotics": IOT_ROBOTICS_RSS_FEEDS,
 }
 
 

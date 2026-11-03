@@ -151,7 +151,8 @@ IG_KEYWORDS: dict[str, list[str]] = {
     ],
 
     "Data Structures and Algorithm": [
-        "data structures", "algorithm", "competitive programming",
+        "data structures", "data structure", "data structures and algorithms",
+        "algorithm", "algorithms", "competitive programming",
         "cp contest", "codeforces", "leetcode", "coding contest",
         "lockout", "1v1 programming", "programming tournament",
         "codesprint", "code race", "dsa", "dynamic programming",
@@ -355,7 +356,10 @@ IG_KEYWORDS: dict[str, list[str]] = {
         "quantum ml", "quantum computing", "quantum hackathon",
         "superposition", "entanglement", "quantum algorithm",
         "quantum challenge", "quantum innovation",
-        "quantum software", "quantum physics"
+        "quantum software", "quantum physics",
+        "quantum technologies", "quantum technology", "quantum tech",
+        "post-quantum", "quantum-safe", "quantum error correction",
+        "quantum annealing", "quantum supremacy"
     ],
 
     "Creative Design": [

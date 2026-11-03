@@ -214,7 +214,7 @@ interest_groups:
     name: "Quantum Computing"
     description: "Quantum algorithms, qubits, Qiskit, quantum superposition, quantum machine learning, quantum error correction."
     keywords: ["quantum", "qubit", "qiskit", "quantum circuit", "quantum ml", "quantum computing", "quantum algorithm", "quantum physics"]
-    aliases: ["quantum computing", "quantum"]
+    aliases: ["quantum computing", "quantum", "quantum technologies", "quantum technology"]
     search_queries:
       news: ["quantum computing hardware algorithms news"]
       hackathons: ["quantum computing challenge"]
@@ -240,7 +240,7 @@ interest_groups:
     name: "Data Structures and Algorithm"
     description: "Competitive programming, LeetCode, Codeforces, algorithmic challenges, graph theory, dynamic programming."
     keywords: ["data structures", "algorithm", "competitive programming", "codeforces", "leetcode", "coding contest", "dsa", "dynamic programming", "graph algorithm"]
-    aliases: ["data structures and algorithm", "dsa", "competitive programming"]
+    aliases: ["data structures and algorithm", "data structures and algorithms", "dsa", "competitive programming", "algorithms"]
     search_queries:
       news: ["competitive programming algorithms contest"]
       hackathons: ["competitive programming coding contest"]
