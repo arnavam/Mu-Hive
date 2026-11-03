@@ -13,6 +13,9 @@ import asyncio
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from src.config.console import configure_stdio
+configure_stdio()
+
 # Import and run the main pipeline
 from src.orchestrator import run_pipeline
 

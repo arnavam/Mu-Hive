@@ -245,8 +245,8 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
 async def run_rss_agent():
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper starting...")
     db        = DatabaseFacade()
-    seen_urls = set()
-    seen_titles: list[set] = []  # List of (word_set, title_str) for duplicate detection
+    seen_url_igs = set()          # (link, ig) pairs handled in this run
+    seen_titles: list[tuple] = []  # (ig, word_set, title_str) for duplicate detection
     semaphore = asyncio.Semaphore(5)
 
     stats = {
@@ -265,13 +265,17 @@ async def run_rss_agent():
         """Extract lowercase word set from a title for similarity comparison."""
         return set(title.lower().split()) - {"the", "a", "an", "is", "in", "on", "of", "and", "to", "for", "with", "at", "by"}
 
-    def _is_near_duplicate(title: str) -> bool:
-        """Check if a title is >80% similar (Jaccard) to any previously seen title."""
+    def _is_near_duplicate(title: str, ig: str) -> bool:
+        """Check if a title is >80% similar (Jaccard) to another seen title.
+
+        Scoped per interest group: the same story legitimately belongs to
+        several IGs and must not be dropped for the second one.
+        """
         words = _title_words(title)
         if len(words) < 3:
             return False
-        for seen_words, _ in seen_titles:
-            if not seen_words:
+        for seen_ig, seen_words, _ in seen_titles:
+            if seen_ig != ig or not seen_words:
                 continue
             intersection = words & seen_words
             union = words | seen_words
@@ -288,7 +292,7 @@ async def run_rss_agent():
         if isinstance(ig_categories, str):
             ig_categories = [ig_categories]
         try:
-            logger.info(f"Fetching RSS: {feed_url} [{ig_category}]")
+            logger.info(f"Fetching RSS: {feed_url} [{', '.join(ig_categories)}]")
             async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
                                          headers={"User-Agent": USER_AGENT}) as client:
                 r = await client.get(feed_url)
@@ -313,17 +317,17 @@ async def run_rss_agent():
 
                         if not link:
                             continue
-                        if link in seen_urls:
+                        if (link, ig_category) in seen_url_igs:
                             stats["duplicates_skipped"] += 1
                             continue
-                        seen_urls.add(link)
+                        seen_url_igs.add((link, ig_category))
 
-                        # Near-duplicate detection across feeds
-                        if _is_near_duplicate(title):
+                        # Near-duplicate detection across feeds, per IG
+                        if _is_near_duplicate(title, ig_category):
                             logger.info(f"  [Skip] Near-duplicate title: {title[:60]}")
                             stats["near_duplicates_skipped"] += 1
                             continue
-                        seen_titles.append((_title_words(title), title))
+                        seen_titles.append((ig_category, _title_words(title), title))
 
                         if db.link_exists(link, ig_category):
                             logger.info(f"  [Skip] Already in DB: {link[:60]}")

@@ -5,15 +5,21 @@ main.py
 Triggers the Zulip notification pipeline.
 """
 
+import asyncio
+import logging
+import sys
+import os
+
+from src.config.console import configure_stdio
+
+# Must happen before importing agents/loggers that emit emoji/arrows.
+configure_stdio()
+
 from scripts.zulip_notify import run_zulip_notifications
 from scripts.gmailsender import run_email_agent
 from src.agents.intelligence import LLMFailureThresholdExceeded
 from src.orchestrator import run_pipeline
 from src.config.logging_config import setup_logging
-import asyncio
-import logging
-import sys
-import os
 
 setup_logging()
 

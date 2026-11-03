@@ -143,7 +143,8 @@ def run_email_agent():
             cursor.execute(
                 """
                 SELECT DISTINCT e.id, e.category, e.summary, e.apply_link,
-                    e.platform, e.location, e.deadline
+                    e.platform, e.location, e.deadline,
+                    e.validity_score, e.created_at
                 FROM events e
                 LEFT JOIN event_interest_groups jig
                     ON jig.event_id = e.id AND LOWER(jig.ig_name) = LOWER(%s)
@@ -166,7 +167,8 @@ def run_email_agent():
             cursor.execute(
                 """
                 SELECT DISTINCT e.id, e.category, e.summary, e.apply_link,
-                    e.platform, e.location, e.deadline
+                    e.platform, e.location, e.deadline,
+                    e.validity_score, e.created_at
                 FROM events e
                 LEFT JOIN event_interest_groups jig
                     ON jig.event_id = e.id AND LOWER(jig.ig_name) = LOWER(%s)

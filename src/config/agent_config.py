@@ -2,6 +2,11 @@ import os
 import sys
 import logging
 from dotenv import load_dotenv
+
+# Must run before any logging call: Windows cp1252 cannot encode the arrow
+# and emoji used in console output.
+from src.config.console import configure_stdio
+configure_stdio()
 from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.models.fallback import FallbackModel
@@ -90,7 +95,7 @@ if fallback_models:
     names = [GROQ_MODEL_NAME] + [backup_groq_name] * (GROQ_MODEL_NAME != backup_groq_name)
     if OPENROUTER_API_KEY:
         names.append("openrouter/gemini-2.5-flash")
-    logger.info(f"LLM configured with fallback chain: {' → '.join(names)}")
+    logger.info(f"LLM configured with fallback chain: {' -> '.join(names)}")
 else:
     model = primary_model
     logger.info(f"LLM configured: Groq/{GROQ_MODEL_NAME}")

@@ -9,7 +9,9 @@ the gmail stats-contract fix. No network, DB, sends, or live search.
 """
 
 import asyncio
+import io
 import os
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -285,6 +287,39 @@ class TestSearchDryRun(unittest.TestCase):
         self.assertEqual(len(report["igs_without_destinations"]), 13)
 
 
+class TestConsoleEncoding(unittest.TestCase):
+    def test_configure_stdio_forces_utf8(self):
+        """Windows cp1252 streams must be reconfigured, or emoji crash prints."""
+        import sys
+        from src.config import console
+
+        calls = []
+
+        class FakeStream:
+            def reconfigure(self, **kwargs):
+                calls.append(kwargs)
+
+        with patch.object(sys, "stdout", FakeStream()), \
+             patch.object(sys, "stderr", FakeStream()):
+            console.configure_stdio()
+
+        self.assertEqual(
+            calls,
+            [{"encoding": "utf-8", "errors": "replace"}] * 2,
+        )
+
+    def test_configure_stdio_tolerates_streams_without_reconfigure(self):
+        import sys
+        from src.config import console
+
+        class PlainStream:
+            pass
+
+        with patch.object(sys, "stdout", PlainStream()), \
+             patch.object(sys, "stderr", PlainStream()):
+            console.configure_stdio()  # must not raise
+
+
 class TestGmailStatsContract(unittest.TestCase):
     def test_missing_creds_returns_zeroed_stats(self):
         import scripts.gmailsender as gm
@@ -298,6 +333,96 @@ class TestGmailStatsContract(unittest.TestCase):
             "igs_processed": 0, "igs_skipped_cap": 0,
             "igs_unconfigured": 0, "emails_sent": 0,
         })
+
+
+class TestRssMultiIg(unittest.TestCase):
+    """RSS feeds must not crash and must attribute shared feeds to every IG."""
+
+    def test_shared_feed_attributed_to_all_igs(self):
+        from src.scraping import scraper_agent as sa
+
+        feed = SimpleNamespace(entries=[{
+            "link": "https://example.com/story",
+            "title": "A shared story about artificial intelligence",
+            "summary": "<p>Hello</p>",
+        }])
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url):
+                return SimpleNamespace(
+                    raise_for_status=lambda: None,
+                    content=b"<rss/>",
+                )
+
+        class FakeBrowser:
+            async def close(self):
+                pass
+
+        class FakePlaywright:
+            async def __aenter__(self):
+                return SimpleNamespace(
+                    chromium=SimpleNamespace(
+                        launch=AsyncMock(return_value=FakeBrowser())
+                    )
+                )
+
+            async def __aexit__(self, *exc):
+                return False
+
+        mock_db = MagicMock()
+        mock_db.link_exists.return_value = False
+        mock_db.scrapes.insert_queue.return_value = 1
+
+        feeds = {"AI": ["https://example.com/feed"],
+                 "UI/UX": ["https://example.com/feed"]}
+
+        with patch.object(sa, "DatabaseFacade", return_value=mock_db), \
+             patch.object(sa, "httpx") as mock_httpx, \
+             patch.object(sa, "feedparser") as mock_feedparser, \
+             patch.object(sa, "async_playwright", return_value=FakePlaywright()), \
+             patch.object(sa, "scrape_url", new=AsyncMock(return_value={
+                 "text": "word " * 200,
+                 "page_title": "Title",
+                 "meta_description": "Desc",
+                 "layer": "L1",
+             })), \
+             patch("src.config.sources.ALL_RSS_FEEDS", feeds):
+            mock_httpx.AsyncClient.return_value = FakeClient()
+            mock_feedparser.parse.return_value = feed
+            stats = _run(sa.run_rss_agent())
+
+        self.assertEqual(stats["feeds_processed"], 1)
+        self.assertEqual(stats["items_inserted"], 2)
+        inserted_igs = sorted(
+            call.args[2] for call in mock_db.scrapes.insert_queue.call_args_list
+        )
+        self.assertEqual(inserted_igs, ["AI", "UI/UX"])
+
+
+class TestGmailQueryShape(unittest.TestCase):
+    """SELECT DISTINCT + ORDER BY columns must be projected (Postgres rule)."""
+
+    def test_distinct_queries_project_order_columns(self):
+        with io.open("scripts/gmailsender.py", encoding="utf-8") as handle:
+            src = handle.read()
+        blocks = re.findall(
+            r"SELECT DISTINCT(.*?)ORDER BY(.*?)(?:\"\"\"|\n\s*LIMIT)",
+            src,
+            re.S,
+        )
+        self.assertEqual(len(blocks), 2, "expected both News/Hackathon queries")
+        for select_list, order_by in blocks:
+            for column in re.findall(r"e\.[a-z_]+", order_by):
+                self.assertIn(
+                    column, select_list,
+                    f"ORDER BY {column} missing from SELECT DISTINCT list",
+                )
 
 
 if __name__ == "__main__":

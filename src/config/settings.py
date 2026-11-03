@@ -1,6 +1,11 @@
 import os
 from dotenv import load_dotenv
 
+from src.config.console import configure_stdio
+
+# Imported very early by most entry points; keeps console output UTF-8 safe.
+configure_stdio()
+
 # Load environment variables
 load_dotenv(override=True)
 
