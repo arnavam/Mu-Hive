@@ -449,6 +449,24 @@ class TestRssUserAgentFallback(unittest.TestCase):
         _run(fetch_feed_bytes(FakeClient(), "https://example.com/feed"))
         self.assertEqual(calls, [None])
 
+    def test_retries_transient_transport_errors(self):
+        from src.scraping import scraper_agent as sa
+
+        calls = []
+
+        class FakeClient:
+            async def get(self, url, headers=None):
+                calls.append(url)
+                if len(calls) < 3:
+                    raise sa.httpx.RemoteProtocolError("server disconnected")
+                return TestRssUserAgentFallback._Response(200)
+
+        with patch.object(sa.asyncio, "sleep", new=AsyncMock()):
+            data = _run(sa.fetch_feed_bytes(FakeClient(), "https://example.com/feed"))
+
+        self.assertEqual(data, b"<rss/>")
+        self.assertEqual(len(calls), 3)
+
 
 class TestGmailQueryShape(unittest.TestCase):
     """SELECT DISTINCT + ORDER BY columns must be projected (Postgres rule)."""

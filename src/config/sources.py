@@ -56,8 +56,8 @@ UI_UX_RSS_FEEDS = [
     # --- Added: balance coverage (3 → 8 feeds) ---
     "https://www.nngroup.com/feed/rss/",          # Nielsen Norman Group — UX research gold standard
     "https://alistapart.com/main/feed/",           # A List Apart — web design standards & best practices
-    "https://designmodo.com/feed/",                # Designmodo — design tools, trends, tutorials
-    "https://www.interaction-design.org/literature/feed",  # IxDF — interaction design articles
+    "https://www.uxmatters.com/index.xml",         # UXmatters — UX practice & research
+    "https://www.webdesignerdepot.com/feed/",      # Webdesigner Depot — design trends & tutorials
     "https://uxmovement.com/feed/",                # UX Movement — UI patterns and usability
 ]
 
@@ -69,7 +69,8 @@ CYBER_SEC_RSS_FEEDS = [
     "https://www.darkreading.com/rss.xml",         # Dark Reading — enterprise security analysis
     "https://www.securityweek.com/feed/",          # SecurityWeek — CVE coverage & breach reports
     "https://feeds.feedburner.com/eset/blog",      # ESET — threat research & malware analysis
-    "https://www.cisa.gov/news.xml",               # CISA — US government security advisories
+    "https://www.infosecurity-magazine.com/rss/news/",  # Infosecurity Magazine — industry news
+    "https://www.cybersecuritydive.com/feeds/news/",    # Cybersecurity Dive — enterprise security
     "https://blog.qualys.com/feed",                # Qualys — vulnerability research
 ]
 
@@ -78,11 +79,10 @@ DATA_SCIENCE_RSS_FEEDS = [
     "https://towardsdatascience.com/feed",
     "https://www.kdnuggets.com/feed",
     # --- Added: balance coverage (3 → 8 feeds) ---
-    "https://blog.dataiku.com/feed",               # Dataiku — enterprise data science & MLOps
     "https://databricks.com/feed",                 # Databricks — lakehouse, Spark, data engineering
     "https://aws.amazon.com/blogs/big-data/feed/", # AWS Big Data — cloud data engineering
     "https://blogs.sas.com/content/feed/",         # SAS — analytics industry insights
-    "https://neptune.ai/blog/feed",                # Neptune.ai — MLOps & experiment tracking
+    "https://machinelearningmastery.com/blog/feed/",  # ML Mastery — practical ML tutorials
 ]
 
 DEVOPS_RSS_FEEDS = [

@@ -39,17 +39,41 @@ FEED_READER_UA = "feedparser/6.0 (+https://github.com/kurtmckee/feedparser)"
 RSS_BLOCKED_STATUS = {401, 403, 406, 429}
 
 
-async def fetch_feed_bytes(client, url: str) -> bytes:
-    """Fetch a feed, retrying with a feed-reader UA when blocked as a browser."""
-    response = await client.get(url)
-    if response.status_code in RSS_BLOCKED_STATUS:
-        logger.info(
-            f"[RSS] {url} -> HTTP {response.status_code}; "
-            "retrying with feed-reader user agent"
-        )
-        response = await client.get(url, headers={"User-Agent": FEED_READER_UA})
-    response.raise_for_status()
-    return response.content
+async def fetch_feed_bytes(client, url: str, attempts: int = 3) -> bytes:
+    """Fetch a feed with a reader-UA fallback and bounded retries.
+
+    Transient transport errors are common when dozens of feeds are fetched
+    concurrently, so retry with exponential backoff. Permanent 4xx responses
+    (other than 408/425/429) fail immediately.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            response = await client.get(url)
+            if response.status_code in RSS_BLOCKED_STATUS:
+                logger.info(
+                    f"[RSS] {url} -> HTTP {response.status_code}; "
+                    "retrying with feed-reader user agent"
+                )
+                response = await client.get(
+                    url, headers={"User-Agent": FEED_READER_UA}
+                )
+            response.raise_for_status()
+            return response.content
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status and 400 <= status < 500 and status not in {408, 425, 429}:
+                raise
+            if attempt < attempts - 1:
+                delay = 2 ** attempt
+                logger.info(
+                    f"[RSS] {url} -> {str(exc) or type(exc).__name__}; "
+                    f"retry {attempt + 1}/{attempts - 1} in {delay}s"
+                )
+                await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
  
  
 # ── Text extraction ───────────────────────────────────────────────────────────
@@ -402,7 +426,7 @@ async def run_rss_agent():
                             logger.info(f"  [saved:{link[:40]}] "
                                         f"(RSS) layer={result['layer']} words={len(result['text'].split())}")
         except Exception as e:
-            logger.info(f"[RSS Error] {feed_url} -> {e}")
+            logger.info(f"[RSS Error] {feed_url} -> {str(e) or type(e).__name__}")
 
     from src.config.sources import ALL_RSS_FEEDS
 
