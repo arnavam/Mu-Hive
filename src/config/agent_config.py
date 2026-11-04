@@ -17,7 +17,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL_NAME = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # ── Shared LLM settings (env-configurable) ──

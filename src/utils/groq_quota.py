@@ -197,8 +197,8 @@ def groq_quota_available(model_name: str | None = None) -> bool:
 
 
 def get_groq_tokens_used() -> int:
-    """Current high-water mark (observability only)."""
-    return max(_groq_tokens_used, get_daily_tokens())
+    """In-process high-water mark (observability only, never touches the DB)."""
+    return _groq_tokens_used
 
 
 def parse_and_record_groq_usage(error_message: str):
