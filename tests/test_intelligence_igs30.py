@@ -348,6 +348,8 @@ class TestValidationAndLimits(unittest.TestCase):
             "by_score": {"9-10": 0, "7-8": 0, "5-6": 0, "1-4": 0, "0": 0},
             "llm_errors": 0, "llm_retries": 0, "batches": 0, "failed": 0,
             "splits": 0, "hard_fails": 0, "quota_used_high_watermark": 0,
+            "tokens_in": 0, "tokens_out": 0, "tokens_estimated": 0,
+            "cache_hits": 0, "quota_blocked": 0,
             "ig_assignments": 0, "membership_histogram": {}, "fallback_used": 0,
         })
 

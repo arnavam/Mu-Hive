@@ -111,7 +111,11 @@ class DatabaseFacade:
     # ----------------------------------------------------
     def link_exists(self, link, keyword):
         return self.scrapes.link_exists(link, keyword)
-        
+
+    def existing_url_igs(self, pairs):
+        """Batched existence check for (url, ig) pairs."""
+        return self.scrapes.existing_url_igs(pairs)
+
     def insert_event(self, title, link, keyword_used, source_engine, status):
         return self.scrapes.insert_queue(title, link, keyword_used, source_engine, status)
         
@@ -123,7 +127,7 @@ class DatabaseFacade:
             row['link'] = row['url']
         return rows
         
-    def update_event_scrape(self, doc_id, status, scraped_page_title=None, scraped_meta_description=None, scraped_full_text=None, scrape_layer=None, scrape_error=None, retry_count=None):
+    def update_event_scrape(self, doc_id, status, scraped_page_title=None, scraped_meta_description=None, scraped_full_text=None, scrape_layer=None, scrape_error=None, retry_count=None, needs_enrichment=None):
         scrape_data = {}
         if scraped_page_title: scrape_data['scraped_page_title'] = scraped_page_title
         if scraped_meta_description: scrape_data['scraped_meta_description'] = scraped_meta_description
@@ -131,7 +135,40 @@ class DatabaseFacade:
         if scrape_error: scrape_data['scrape_error'] = scrape_error
         if retry_count is not None: scrape_data['retry_count'] = retry_count
         
-        return self.scrapes.update_scrape(doc_id, status, scrape_layer, scrape_data)
+        return self.scrapes.update_scrape(
+            doc_id, status, scrape_layer, scrape_data,
+            needs_enrichment=needs_enrichment,
+        )
+
+    # ----------------------------------------------------
+    # LLM evaluation cache (one evaluation per article URL)
+    # ----------------------------------------------------
+    def get_cached_evaluations(self, urls):
+        """Return {url: evaluation_dict} for previously evaluated URLs."""
+        urls = [u for u in (urls or []) if u]
+        if not urls:
+            return {}
+        with db_conn.get_cursor(factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT url, evaluation FROM llm_evaluations WHERE url = ANY(%s)",
+                (list(set(urls)),),
+            )
+            return {row["url"]: row["evaluation"] for row in cur.fetchall()}
+
+    def save_cached_evaluation(self, url, title, evaluation, model_name=None):
+        if not url or not evaluation:
+            return False
+        with db_conn.get_cursor() as cur:
+            cur.execute("""
+                INSERT INTO llm_evaluations (url, title, evaluation, model)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    evaluation = EXCLUDED.evaluation,
+                    model = EXCLUDED.model
+            """, (url, title, json.dumps(evaluation), model_name))
+            return True
+
 
     # ----------------------------------------------------
     # New Methods for Scout and Intelligence Agents

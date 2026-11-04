@@ -35,6 +35,8 @@ class InterestGroupRegistry:
     def __init__(self, config_path: str | Path | None = None):
         self._groups: dict[str, InterestGroup] = {}
         self._alias_map: dict[str, str] = {}
+        self.hackathon_keywords: dict[str, list[str]] = {}
+        self.related_igs: dict[str, list[str]] = {}
         self._load_config(config_path)
 
     def _load_config(self, config_path: str | Path | None = None):
@@ -48,6 +50,15 @@ class InterestGroupRegistry:
 
         with open(config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+
+        self.hackathon_keywords = {
+            str(name): [str(k) for k in (keywords or [])]
+            for name, keywords in (data.get("hackathon_keywords") or {}).items()
+        }
+        self.related_igs = {
+            str(name): [str(related) for related in (related or [])]
+            for name, related in (data.get("related_igs") or {}).items()
+        }
 
         for item in data.get("interest_groups", []):
             ig = InterestGroup(

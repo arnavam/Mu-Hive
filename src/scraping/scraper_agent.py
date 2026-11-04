@@ -252,9 +252,19 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
 
             if not result:
                 current_data["retry_count"] = retry_count + 1
-                db.update_event_scrape(doc_id, status="scrape_failed",
-                                       scrape_error="all layers failed",
-                                       retry_count=current_data["retry_count"])
+                # Summary-only rows must stay available to intelligence even
+                # when enrichment fails again; only rows with no summary are
+                # parked as scrape_failed.
+                has_summary = bool(current_data.get("summary") or current_data.get("scraped_full_text"))
+                new_retry_count = current_data["retry_count"]
+                keep_for_intelligence = has_summary
+                db.update_event_scrape(
+                    doc_id,
+                    status="scraped" if keep_for_intelligence else "scrape_failed",
+                    scrape_error="enrichment failed; summary retained" if keep_for_intelligence else "all layers failed",
+                    retry_count=new_retry_count,
+                    needs_enrichment=keep_for_intelligence and new_retry_count < 3,
+                )
                 stats["scrape_failed"] += 1
                 return
 
@@ -265,6 +275,7 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
                 scraped_meta_description=result["meta_description"],
                 scraped_full_text=result["text"],
                 scrape_layer=result["layer"],
+                needs_enrichment=False,
             )
             stats["scraped_ok"] += 1
             layer = result["layer"]
@@ -289,12 +300,17 @@ async def run_rss_agent():
     db        = DatabaseFacade()
     seen_url_igs = set()          # (link, ig) pairs handled in this run
     seen_titles: list[tuple] = []  # (ig, word_set, title_str) for duplicate detection
+    seen_title_index: dict[str, dict[str, list[int]]] = {}  # ig -> word -> row indices
     semaphore = asyncio.Semaphore(5)
+    feed_semaphore = asyncio.Semaphore(
+        max(1, int(os.getenv("RSS_FEED_CONCURRENCY", "10")))
+    )
 
     stats = {
         "feeds_processed": 0,
         "entries_found": 0,
         "items_inserted": 0,
+        "summary_only_inserted": 0,
         "duplicates_skipped": 0,
         "near_duplicates_skipped": 0,
         "scrape_failures": 0,
@@ -312,11 +328,20 @@ async def run_rss_agent():
 
         Scoped per interest group: the same story legitimately belongs to
         several IGs and must not be dropped for the second one.
+
+        Candidate rows come from a per-IG inverted index (word -> row), so
+        only titles sharing at least one word are compared instead of every
+        previously seen title (previously O(n^2) per IG).
         """
         words = _title_words(title)
         if len(words) < 3:
             return False
-        for seen_ig, seen_words, _ in seen_titles:
+        index = seen_title_index.get(ig) or {}
+        candidate_rows = set()
+        for word in words:
+            candidate_rows.update(index.get(word, ()))
+        for row_idx in candidate_rows:
+            seen_ig, seen_words, _ = seen_titles[row_idx]
             if seen_ig != ig or not seen_words:
                 continue
             intersection = words & seen_words
@@ -324,6 +349,14 @@ async def run_rss_agent():
             if len(union) > 0 and len(intersection) / len(union) > 0.8:
                 return True
         return False
+
+    def _remember_title(title: str, ig: str) -> None:
+        words = _title_words(title)
+        row_idx = len(seen_titles)
+        seen_titles.append((ig, words, title))
+        index = seen_title_index.setdefault(ig, {})
+        for word in words:
+            index.setdefault(word, []).append(row_idx)
 
     async def process_rss_feed(feed_url, browser, ig_categories):
         """Fetch one feed URL once; attribute entries to each listed IG.
@@ -335,9 +368,10 @@ async def run_rss_agent():
             ig_categories = [ig_categories]
         try:
             logger.info(f"Fetching RSS: {feed_url} [{', '.join(ig_categories)}]")
-            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
-                                         headers={"User-Agent": USER_AGENT}) as client:
-                feed_data = await fetch_feed_bytes(client, feed_url)
+            async with feed_semaphore:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+                                             headers={"User-Agent": USER_AGENT}) as client:
+                    feed_data = await fetch_feed_bytes(client, feed_url)
 
             feed = feedparser.parse(feed_data)
             stats["feeds_processed"] += 1
@@ -349,82 +383,125 @@ async def run_rss_agent():
             stats["entries_found"] += len(feed.entries[:5])
             logger.info(f"[RSS] {feed_url} -> {len(feed.entries)} entries, processing top 5")
 
+            # Resolve in-memory duplicates first, then check DB existence in a
+            # single batched query per feed instead of one query per entry.
+            candidates = []
             for ig_category in ig_categories:
                 for entry in feed.entries[:5]:
-                    async with semaphore:
-                        link  = entry.get("link")
-                        title = entry.get("title", "No Title")
+                    link  = entry.get("link")
+                    title = entry.get("title", "No Title")
 
-                        if not link:
-                            continue
-                        if (link, ig_category) in seen_url_igs:
-                            stats["duplicates_skipped"] += 1
-                            continue
-                        seen_url_igs.add((link, ig_category))
+                    if not link:
+                        continue
+                    if (link, ig_category) in seen_url_igs:
+                        stats["duplicates_skipped"] += 1
+                        continue
+                    seen_url_igs.add((link, ig_category))
 
-                        # Near-duplicate detection across feeds, per IG
-                        if _is_near_duplicate(title, ig_category):
-                            logger.info(f"  [Skip] Near-duplicate title: {title[:60]}")
-                            stats["near_duplicates_skipped"] += 1
-                            continue
-                        seen_titles.append((ig_category, _title_words(title), title))
+                    # Near-duplicate detection across feeds, per IG
+                    if _is_near_duplicate(title, ig_category):
+                        logger.info(f"  [Skip] Near-duplicate title: {title[:60]}")
+                        stats["near_duplicates_skipped"] += 1
+                        continue
+                    _remember_title(title, ig_category)
+                    candidates.append((ig_category, entry, link, title))
 
-                        if db.link_exists(link, ig_category):
-                            logger.info(f"  [Skip] Already in DB: {link[:60]}")
-                            stats["duplicates_skipped"] += 1
-                            continue
+            existing = db.existing_url_igs(
+                [(link, ig_category) for ig_category, _entry, link, _title in candidates]
+            )
+            for ig_category, entry, link, title in candidates:
+                async with semaphore:
+                    if (link, ig_category) in existing:
+                        logger.info(f"  [Skip] Already in DB: {link[:60]}")
+                        stats["duplicates_skipped"] += 1
+                        continue
 
-                        logger.info(f"\n── RSS Item: {title} | {link}")
+                    logger.info(f"\n── RSS Item: {title} | {link}")
 
-                        if any(spam in link for spam in SPAM_DOMAINS):
-                            logger.info("  [Skip] Spam domain filtered.")
-                            continue
+                    if any(spam in link for spam in SPAM_DOMAINS):
+                        logger.info("  [Skip] Spam domain filtered.")
+                        continue
 
-                        result = await scrape_url(link, browser)
-                        if not result:
-                            logger.info(f"  [Fail] RSS item scrape failed: {link[:50]}")
+                    # Clean the RSS summary once; it is the fallback payload
+                    # when full-text extraction fails.
+                    rss_summary = entry.get("summary", "") or entry.get("description", "")
+                    if rss_summary:
+                        from bs4 import BeautifulSoup as _BS
+                        rss_summary = _BS(rss_summary, "html.parser").get_text(
+                            separator=' ', strip=True
+                        )
+
+                    result = await scrape_url(link, browser)
+
+                    # Extract published timestamp for recency bonus in intelligence agent
+                    import calendar
+                    published_at = None
+                    pub_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+                    if pub_parsed:
+                        try:
+                            published_at = calendar.timegm(pub_parsed)
+                        except Exception:
+                            pass
+
+                    if not result:
+                        # Persist summary-only items instead of dropping them.
+                        # Intelligence decides relevance from the summary, and
+                        # needs_enrichment lets a later run retry full text.
+                        if not rss_summary:
+                            logger.info(f"  [Fail] RSS item scrape failed (no summary): {link[:50]}")
                             stats["scrape_failures"] += 1
                             continue
-
-                        # Track scrape layer
-                        layer = result.get("layer", "L1")
-                        if layer in stats["scrape_layers"]:
-                            stats["scrape_layers"][layer] += 1
-
-                        # Build data dict with RSS summary and category for downstream agents
-                        rss_summary = entry.get("summary", "")
-                        if rss_summary:
-                            from bs4 import BeautifulSoup as _BS
-                            rss_summary = _BS(rss_summary, "html.parser").get_text(separator=' ', strip=True)
-
-                        # Extract published timestamp for recency bonus in intelligence agent
-                        import calendar
-                        published_at = None
-                        pub_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-                        if pub_parsed:
-                            try:
-                                published_at = calendar.timegm(pub_parsed)
-                            except Exception:
-                                pass
-
                         item_data = {
                             "summary": rss_summary,
                             "category": "News",
                             "ig_tags": [ig_category],
-                            "scraped_full_text": result["text"],
-                            "scraped_page_title": result["page_title"],
-                            "scraped_meta_description": result["meta_description"],
+                            "scraped_page_title": title,
+                            "scraped_meta_description": rss_summary[:300],
+                            "needs_enrichment": True,
+                            "scrape_error": "all layers failed; summary-only",
                         }
                         if published_at is not None:
                             item_data["published_at"] = published_at
-
                         doc_id = db.scrapes.insert_queue(
-                            title, link, ig_category, "RSS", "scraped", data=item_data
+                            title, link, ig_category, "RSS", "scraped",
+                            data=item_data, needs_enrichment=True,
                         )
                         if doc_id:
                             stats["items_inserted"] += 1
-                            logger.info(f"  [saved:{link[:40]}] "
-                                        f"(RSS) layer={result['layer']} words={len(result['text'].split())}")
+                            stats["summary_only_inserted"] = (
+                                stats.get("summary_only_inserted", 0) + 1
+                            )
+                            logger.info(
+                                f"  [saved:{link[:40]}] (RSS summary-only) "
+                                f"chars={len(rss_summary)} needs_enrichment=true"
+                            )
+                        else:
+                            stats["scrape_failures"] += 1
+                        continue
+
+                    # Track scrape layer
+                    layer = result.get("layer", "L1")
+                    if layer in stats["scrape_layers"]:
+                        stats["scrape_layers"][layer] += 1
+
+                    item_data = {
+                        "summary": rss_summary,
+                        "category": "News",
+                        "ig_tags": [ig_category],
+                        "scraped_full_text": result["text"],
+                        "scraped_page_title": result["page_title"],
+                        "scraped_meta_description": result["meta_description"],
+                    }
+                    if published_at is not None:
+                        item_data["published_at"] = published_at
+
+                    doc_id = db.scrapes.insert_queue(
+                        title, link, ig_category, "RSS", "scraped", data=item_data
+                    )
+                    if doc_id:
+                        stats["items_inserted"] += 1
+                        logger.info(f"  [saved:{link[:40]}] "
+                                    f"(RSS) layer={result['layer']} words={len(result['text'].split())}")
         except Exception as e:
             logger.info(f"[RSS Error] {feed_url} -> {str(e) or type(e).__name__}")
 

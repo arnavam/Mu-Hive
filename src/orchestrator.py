@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from dataclasses import dataclass, field
 from src.scraping.scraper import run_scraper_pipeline 
 from src.scraping.scraper_agent import run_rss_agent, run_scraper_agent
 from src.agents.intelligence import run_intelligence, LLMFailureThresholdExceeded
@@ -15,6 +16,24 @@ from src.config.settings import (
 from src.config.interest_groups import registry, shared_query_index
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PipelineResult:
+    """Outcome of one pipeline execution.
+
+    ``ok`` is False when any phase failed or degraded. Callers (main.py,
+    cron, CI) must use this to decide the process exit code; a completed
+    Phase 3 must not hide a failed Phase 1/2.
+    """
+
+    ok: bool = True
+    phase_failures: list[str] = field(default_factory=list)
+    rss_stats: dict | None = None
+    search_stats: dict | None = None
+    scraper_stats: dict | None = None
+    intel_stats: dict | None = None
+    comm_stats: dict | None = None
 
 # --- Pipeline Configuration ---
 # Kept for backward compatibility; the authority is settings.INTELLIGENCE_MAX_DOCS_PER_RUN.
@@ -97,10 +116,16 @@ def _log_phase_report(phase_name: str, stats: dict | None):
 
 async def run_pipeline():
     """Executes the full Mu-Hive intelligence pipeline sequentially.
-    Each phase is error-isolated so failures don't block subsequent phases."""
+
+    Each phase is error-isolated so a failure does not block later phases,
+    but failures are recorded in ``PipelineResult.phase_failures`` and make
+    ``result.ok`` False. Callers must surface that as a non-zero exit code.
+    """
     logger.info("=" * 50)
     logger.info("Mu-Hive Intelligence Pipeline - Starting")
     logger.info("=" * 50)
+
+    failures: list[str] = []
 
     # Phase 1: Scout — Search & Scraping
     rss_stats = None
@@ -166,7 +191,8 @@ async def run_pipeline():
         logger.info("Running Scraper Agent to process pending event links...")
         scraper_stats = await run_scraper_agent()
     except Exception as e:
-        logger.error(f"Scout Agent failed: {e}. Continuing with existing data...")
+        failures.append(f"scout: {e}")
+        logger.exception("Scout Agent failed. Continuing with existing data...")
 
     # Phase 1 Report
     logger.info("")
@@ -190,9 +216,11 @@ async def run_pipeline():
         logger.info("Phase 2: Running Intelligence Agent (LLM evaluation)...")
         intel_stats = await run_intelligence(batch_limit=INTELLIGENCE_BATCH_LIMIT)
     except LLMFailureThresholdExceeded as e:
-        logger.error(f"Intelligence Agent hard-failed: {e}. Continuing to Phase 3 with items scored so far...")
+        failures.append(f"intelligence: {e}")
+        logger.exception("Intelligence Agent hard-failed. Continuing to Phase 3 with items scored so far...")
     except Exception as e:
-        logger.error(f"Intelligence Agent failed: {e}. Continuing with existing scores...")
+        failures.append(f"intelligence: {e}")
+        logger.exception("Intelligence Agent failed. Continuing with existing scores...")
 
     # Phase 2 Report
     logger.info("")
@@ -212,7 +240,8 @@ async def run_pipeline():
         logger.info("Phase 3: Running Communicator (curated digest output)...")
         comm_stats = run_communicator()
     except Exception as e:
-        logger.error(f"Communicator failed: {e}")
+        failures.append(f"communicator: {e}")
+        logger.exception("Communicator failed.")
 
     # Phase 3 Report
     logger.info("")
@@ -223,6 +252,23 @@ async def run_pipeline():
     logger.info("")
 
     logger.info("Pipeline execution complete.")
+
+    if failures:
+        logger.error(
+            "Pipeline finished with %d failed phase(s): %s",
+            len(failures),
+            "; ".join(failures),
+        )
+
+    return PipelineResult(
+        ok=not failures,
+        phase_failures=failures,
+        rss_stats=rss_stats,
+        search_stats=search_stats,
+        scraper_stats=scraper_stats,
+        intel_stats=intel_stats,
+        comm_stats=comm_stats,
+    )
 
 if __name__ == "__main__":
     setup_logging()

@@ -10,10 +10,11 @@ from pydantic_ai.settings import ModelSettings
 import asyncio
 
 from src.db.postgres_database import DatabaseFacade as Database
-from src.config.agent_config import model, shared_model_settings
+from src.config.agent_config import model, shared_model_settings, ACTIVE_BULK_MODEL
 from src.config.logging_config import setup_logging
 from src.config.sources import SOURCE_PRIORITY, FIRST_PARTY_DOMAINS
 from src.config.constants import MASTER_IGS
+from src.utils.groq_quota import record_llm_usage, groq_quota_available
 
 logger = logging.getLogger(__name__)
 MAX_LLM_API_ERRORS_BEFORE_FAIL = 10
@@ -125,7 +126,17 @@ intelligence_agent = Agent(
 # Batch size is configured here, in exactly one place. run_intelligence()
 # defaults to it; callers/tests should import this constant, never hard-code 8.
 INTELLIGENCE_BATCH_SIZE = int(os.getenv("INTELLIGENCE_BATCH_SIZE", "8"))
-INTELLIGENCE_BATCH_MAX_TOKENS = int(os.getenv("INTELLIGENCE_BATCH_MAX_TOKENS", "4096"))
+INTELLIGENCE_BATCH_MAX_TOKENS = int(os.getenv("INTELLIGENCE_BATCH_MAX_TOKENS", "2048"))
+# Per-item context budget. Full text is truncated so one batch request stays
+# inside Groq's free-tier tokens-per-minute window.
+INTELLIGENCE_MAX_CONTENT_CHARS = int(os.getenv("INTELLIGENCE_MAX_CONTENT_CHARS", "900"))
+INTELLIGENCE_MAX_TITLE_CHARS = int(os.getenv("INTELLIGENCE_MAX_TITLE_CHARS", "300"))
+# When False (default) the pipeline stops issuing new requests once the free
+# daily budget is spent instead of silently moving to a paid provider.
+ALLOW_PAID_FALLBACK = os.getenv("LLM_ALLOW_PAID_FALLBACK", "false").lower() == "true"
+# Minimum spacing between LLM requests. Free-tier TPM is the binding limit, so
+# pacing is cheaper than triggering the SDK's ~34s 429 backoff.
+INTELLIGENCE_REQUEST_PACING = float(os.getenv("INTELLIGENCE_REQUEST_PACING", "20"))
 # Maximum split depth for one group: 8 -> 4 -> 2 -> 1 stays within budget.
 MAX_BATCH_SPLIT_DEPTH = 4
 
@@ -177,7 +188,7 @@ def build_batch_prompt(docs: list) -> str:
     blocks = []
     for doc in docs:
         item_id = str(doc["_id"])
-        title = doc.get("title", "")
+        title = doc.get("title", "")[:INTELLIGENCE_MAX_TITLE_CHARS]
         content = doc.get("scraped_full_text") or doc.get("summary") or ""
         category = doc.get("category", "Unknown")
         source_ig = doc.get("ig_tags", [])
@@ -186,7 +197,7 @@ def build_batch_prompt(docs: list) -> str:
             f"Title: {title}\n"
             f"Category: {category}\n"
             f"Original IG Tags (from source — validate or override these): {source_ig}\n"
-            f"Content: {content[:1500]}\n"
+            f"Content: {content[:INTELLIGENCE_MAX_CONTENT_CHARS]}\n"
             "[/ITEM]"
         )
     ids = ", ".join(str(d["_id"]) for d in docs)
@@ -441,6 +452,11 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
         "splits": 0,  # binary batch splits performed
         "hard_fails": 0,  # provider 400/429 errors counted toward abort
         "quota_used_high_watermark": 0,  # groq TPD high-water mark at run end
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "tokens_estimated": 0,
+        "cache_hits": 0,
+        "quota_blocked": 0,
         # Accuracy diagnostics (aggregate counts only; no payloads logged).
         # no_confident_match ≡ skipped_invalid_ig (docs with zero valid tags).
         "ig_assignments": 0,
@@ -610,13 +626,47 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
         nonlocal hard_fail_count
         if not group:
             return {}
+        prompt = build_batch_prompt(group)
         try:
             result = await run_agent_with_retry(
-                batch_intelligence_agent, build_batch_prompt(group),
+                batch_intelligence_agent, prompt,
                 on_retry=_count_retry,
             )
             stats["batches"] += 1
-            await asyncio.sleep(4)  # Pacing for Groq free tier, per request
+            try:
+                usage = result.usage()
+                model_name = getattr(result.response, "model_name", None) or ACTIVE_BULK_MODEL
+                in_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                out_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+                estimated = False
+                if in_tokens == 0 and out_tokens == 0:
+                    # Some free-tier responses omit usage after a provider
+                    # retry. Estimate conservatively so the daily budget
+                    # ledger still reflects real spend.
+                    in_tokens = max(1, len(prompt) // 4) + 1500
+                    out_tokens = max(1, len(group) * 80)
+                    estimated = True
+                    stats["tokens_estimated"] += 1
+                stats["tokens_in"] += in_tokens
+                stats["tokens_out"] += out_tokens
+                logger.info(
+                    "Batch LLM served by %s (provider=%s, requests=%s, in=%d, out=%d%s)",
+                    model_name,
+                    getattr(result.response, "provider_name", None),
+                    getattr(usage, "requests", 0),
+                    in_tokens,
+                    out_tokens,
+                    ", estimated" if estimated else "",
+                )
+                record_llm_usage(
+                    model_name, in_tokens, out_tokens,
+                    int(getattr(usage, "requests", 1) or 1),
+                )
+                _refresh_quota_watermark()
+            except Exception as usage_err:
+                logger.debug("Could not record LLM usage: %s", usage_err)
+            if INTELLIGENCE_REQUEST_PACING > 0:
+                await asyncio.sleep(INTELLIGENCE_REQUEST_PACING)  # free-tier TPM pacing
         except Exception as e:
             stats["batches"] += 1
             code = _extract_status_code(e)
@@ -686,6 +736,9 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
             mapped.update(recovered)
         return mapped
 
+    processed_count = 0
+    failed_ids: list = []
+
     try:
         docs = db.get_unprocessed_for_intelligence(limit=batch_limit)
 
@@ -694,11 +747,55 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
             _refresh_quota_watermark()
             return stats
 
-        processed_count = 0
-        failed_ids: list = []
+        # Reuse one evaluation per article URL. The same story is often
+        # collected under several IGs; this avoids paying for it repeatedly.
+        cached: dict = {}
+        try:
+            cached = db.get_cached_evaluations(
+                [doc.get("link") or doc.get("url") for doc in docs]
+            )
+        except Exception as cache_err:
+            logger.debug("Evaluation cache lookup failed: %s", cache_err)
+
+        pending_docs = []
+        for doc in docs:
+            link = doc.get("link") or doc.get("url")
+            cached_eval = cached.get(link) if link else None
+            if not cached_eval:
+                pending_docs.append(doc)
+                continue
+            try:
+                intelligence = OpportunityIntelligence.model_validate(cached_eval)
+                _persist(doc, intelligence)
+                stats["cache_hits"] += 1
+                logger.info("  -> cache hit for %s (no LLM call)", link)
+            except Exception as cache_err:
+                logger.debug("Ignoring unusable cached evaluation for %s: %s", link, cache_err)
+                pending_docs.append(doc)
+
+        docs = pending_docs
+        if not docs:
+            logger.info("All %d item(s) served from the evaluation cache.", stats["cache_hits"])
+            _refresh_quota_watermark()
+            return stats
+
         size = max(1, int(batch_size or INTELLIGENCE_BATCH_SIZE))
         for start in range(0, len(docs), size):
             group = docs[start:start + size]
+
+            # Stop before issuing a request we know will 429. Remaining docs
+            # stay unprocessed for the next daily run.
+            if not ALLOW_PAID_FALLBACK and not groq_quota_available(ACTIVE_BULK_MODEL):
+                remaining = docs[start:]
+                failed_ids.extend(doc["_id"] for doc in remaining)
+                stats["quota_blocked"] = len(remaining)
+                logger.warning(
+                    "Groq daily budget exhausted for %s; leaving %d doc(s) "
+                    "unprocessed for the next run.",
+                    ACTIVE_BULK_MODEL, len(remaining),
+                )
+                break
+
             logger.info(
                 f"Evaluating batch of {len(group)} "
                 f"({start + 1}-{start + len(group)}/{len(docs)})..."
@@ -713,6 +810,15 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
                     continue
                 try:
                     _persist(doc, intelligence)
+                    try:
+                        db.save_cached_evaluation(
+                            doc.get("link") or doc.get("url"),
+                            doc.get("title"),
+                            intelligence.model_dump(),
+                            ACTIVE_BULK_MODEL,
+                        )
+                    except Exception as cache_err:
+                        logger.debug("Could not cache evaluation: %s", cache_err)
                 except Exception as e:
                     status_code = _extract_status_code(e)
                     if status_code in HARD_FAIL_STATUS_CODES:
@@ -733,7 +839,9 @@ async def run_intelligence(batch_limit=15, batch_size=INTELLIGENCE_BATCH_SIZE):
             )
 
         logger.info(
-            f"Intelligence Agent finished. Evaluated {processed_count}/{len(docs)} items."
+            f"Intelligence Agent finished. Evaluated {processed_count} item(s) "
+            f"({stats['cache_hits']} from cache), tokens in/out: "
+            f"{stats['tokens_in']}/{stats['tokens_out']}."
         )
     finally:
         db.close()

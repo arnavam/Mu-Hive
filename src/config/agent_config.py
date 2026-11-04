@@ -36,15 +36,23 @@ if not GROQ_API_KEY:
     )
     sys.exit(1)
 
-# ── Build model chain: Primary Groq → Backup Groq → OpenRouter fallback ──
-primary_model = GroqModel(model_name=GROQ_MODEL_NAME)
-backup_groq_name = "llama-3.1-8b-instant"
+# ── Build model chain: bulk Groq → configured Groq → OpenRouter fallback ──
+# Daily bulk classification is routed to the high-TPD free model first.
+# GROQ_MODEL (if different) stays as a quality fallback.
+BULK_MODEL_NAME = os.getenv("GROQ_BULK_MODEL", "openai/gpt-oss-20b")
+ACTIVE_BULK_MODEL = BULK_MODEL_NAME
 
-fallback_models = []
+chain_names: list[str] = []
+if GROQ_MODEL_NAME != BULK_MODEL_NAME:
+    chain_names.append(BULK_MODEL_NAME)
+    chain_names.append(GROQ_MODEL_NAME)
+else:
+    chain_names.append(GROQ_MODEL_NAME)
 
-# Add Groq backup if primary is a different model
-if GROQ_MODEL_NAME != backup_groq_name:
-    fallback_models.append(GroqModel(model_name=backup_groq_name))
+groq_models = {name: GroqModel(model_name=name) for name in chain_names}
+primary_model = groq_models[chain_names[0]]
+
+fallback_models = [groq_models[name] for name in chain_names[1:]]
 
 # Add OpenRouter as final fallback
 if OPENROUTER_API_KEY:
@@ -70,12 +78,19 @@ class QuotaAwareFallbackModel(FallbackModel):
     @property
     def models(self):
         from pydantic_ai.models.groq import GroqModel
-        if not groq_quota_available():
-            filtered = [m for m in self._all_models if not isinstance(m, GroqModel)]
-            if filtered:
-                logger.info("Groq quota near exhausted — routing directly to fallback models.")
-                return filtered
-        return self._all_models
+        # Drop only Groq models whose own daily budget is exhausted, keeping
+        # any model that still has headroom (and always keeping non-Groq).
+        filtered = [
+            m for m in self._all_models
+            if not (isinstance(m, GroqModel)
+                    and not groq_quota_available(getattr(m, "model_name", None)))
+        ]
+        if filtered and len(filtered) != len(self._all_models):
+            logger.info(
+                "Groq daily budget guard active — routing to: %s",
+                ", ".join(type(m).__name__ for m in filtered),
+            )
+        return filtered or self._all_models
 
     @models.setter
     def models(self, value):
@@ -92,11 +107,12 @@ def _should_fallback(exc: Exception) -> bool:
 
 if fallback_models:
     model = QuotaAwareFallbackModel(primary_model, *fallback_models, fallback_on=[_should_fallback])
-    names = [GROQ_MODEL_NAME] + [backup_groq_name] * (GROQ_MODEL_NAME != backup_groq_name)
+    names = list(chain_names)
     if OPENROUTER_API_KEY:
         names.append("openrouter/gemini-2.5-flash")
     logger.info(f"LLM configured with fallback chain: {' -> '.join(names)}")
 else:
     model = primary_model
-    logger.info(f"LLM configured: Groq/{GROQ_MODEL_NAME}")
+    logger.info(f"LLM configured: Groq/{chain_names[0]}")
+
 

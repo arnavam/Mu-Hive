@@ -50,6 +50,45 @@ def initialize_schema():
             cur.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS zulip_sent BOOLEAN DEFAULT FALSE;")
             cur.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS deadline TEXT;")
 
+            # Summary-only RSS rows are persisted immediately and flagged for a
+            # later full-text enrichment attempt. Intelligence still evaluates
+            # them from the summary instead of dropping the item.
+            cur.execute(
+                "ALTER TABLE scraped_data "
+                "ADD COLUMN IF NOT EXISTS needs_enrichment BOOLEAN DEFAULT FALSE;"
+            )
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scraped_data_needs_enrichment
+                ON scraped_data (scraped_at DESC)
+                WHERE needs_enrichment IS TRUE;
+            """)
+
+            # Persistent LLM token ledger (per UTC day + model) so the free-tier
+            # budget survives process restarts and is visible across runs.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS llm_usage (
+                    usage_date DATE NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens BIGINT NOT NULL DEFAULT 0,
+                    output_tokens BIGINT NOT NULL DEFAULT 0,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (usage_date, model)
+                );
+            """)
+
+            # Cross-IG evaluation cache: the same article is often collected
+            # under several IGs, so reuse one LLM evaluation per URL.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS llm_evaluations (
+                    url TEXT PRIMARY KEY,
+                    title TEXT,
+                    evaluation JSONB NOT NULL,
+                    model TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             cur.execute("""
                 DELETE FROM scraped_data a
                 USING scraped_data b
