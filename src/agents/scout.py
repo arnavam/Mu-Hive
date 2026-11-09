@@ -18,8 +18,14 @@ import calendar
 from src.db.postgres_database import DatabaseFacade as Database
 from src.config.sources import ALL_RSS_FEEDS
 from src.config.logging_config import setup_logging
+from src.db.connection import db_conn
 
 logger = logging.getLogger(__name__)
+
+def is_already_scraped(url: str, ig: str, conn) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM scraped_data WHERE url = %s AND ig = %s LIMIT 1", (url, ig))
+        return cur.fetchone() is not None
 
 # --- Config for Scraper ---
 MIN_WORDS = 120
@@ -27,6 +33,7 @@ SCRAPE_LIMIT = 50
 TIMEOUT = 30
 PW_WAIT_MS = 4000
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+feedparser.USER_AGENT = USER_AGENT
 
 try:
     import warnings
@@ -36,60 +43,12 @@ try:
 except ImportError:
     HAS_NEWSPAPER = False
 
-# --- Curated, IG-specific search queries for relevance ---
-SEARCH_QUERIES = {
-    "AI": {
-        "news": [
-            "artificial intelligence AI breakthroughs 2026",
-            "LLM large language model releases news",
-            "generative AI industry updates",
-        ],
-        "hackathons": ["AI machine learning hackathon 2026"],
-        "internships": ["machine learning AI internship 2026"],
-        "events": ["AI conference summit tech event 2026"],
-        "workshops": ["AI deep learning hands-on workshop 2026"],
-    },
-    "Web Development": {
-        "news": [
-            "web development JavaScript React framework news 2026",
-            "frontend backend web dev trends",
-        ],
-        "hackathons": ["web development hackathon frontend backend 2026"],
-        "internships": ["web developer frontend backend internship 2026"],
-        "events": ["web development conference meetup 2026"],
-        "workshops": ["React Node.js web development workshop 2026"],
-    },
-    "UI/UX": {
-        "news": [
-            "UX design trends user experience 2026",
-            "Figma UI design product design updates",
-        ],
-        "hackathons": ["UI UX design hackathon designathon 2026"],
-        "internships": ["UX designer product design internship 2026"],
-        "events": ["UX UI design conference summit 2026"],
-        "workshops": ["Figma prototyping UX design workshop 2026"],
-    },
-    "Cyber Security": {
-        "news": [
-            "cybersecurity vulnerability zero-day threat 2026",
-            "infosec security breach advisory news",
-        ],
-        "hackathons": ["CTF capture the flag cybersecurity hackathon 2026"],
-        "internships": ["cybersecurity SOC analyst intern 2026"],
-        "events": ["cybersecurity infosec conference 2026"],
-        "workshops": ["penetration testing ethical hacking workshop 2026"],
-    },
-    "Data Science": {
-        "news": [
-            "data science analytics trends 2026",
-            "big data engineering visualization news",
-        ],
-        "hackathons": ["data science analytics Kaggle hackathon 2026"],
-        "internships": ["data scientist analytics intern 2026"],
-        "events": ["data science analytics conference 2026"],
-        "workshops": ["Python data science pandas workshop 2026"],
-    },
-}
+# --- Registry-driven search queries (single source: interest_groups.yaml) ---
+# Legacy standalone scout (run_scout_async) shares the same configured queries
+# as the live pipeline; nothing is hard-coded here anymore.
+from src.config.interest_groups import registry as _ig_registry
+
+SEARCH_QUERIES = _ig_registry.search_plan()
 
 
 def clean_html(html_content):
@@ -102,6 +61,24 @@ def clean_html(html_content):
 def run_rss_scout(db: Database):
     logger.info("Running RSS Scout...")
     new_count = 0
+    seen_titles: list[tuple] = []  # (word_set, title) for duplicate detection
+
+    def _title_words(title: str) -> set:
+        return set(title.lower().split()) - {"the", "a", "an", "is", "in", "on", "of", "and", "to", "for", "with", "at", "by"}
+
+    def _is_near_duplicate(title: str) -> bool:
+        words = _title_words(title)
+        if len(words) < 3:
+            return False
+        for seen_words, _ in seen_titles:
+            if not seen_words:
+                continue
+            intersection = words & seen_words
+            union = words | seen_words
+            if len(union) > 0 and len(intersection) / len(union) > 0.8:
+                return True
+        return False
+
     for ig, feeds in ALL_RSS_FEEDS.items():
         for feed_url in feeds:
             try:
@@ -118,14 +95,28 @@ def run_rss_scout(db: Database):
 
                     title = entry.get("title", "").strip()
                     link = entry.get("link", "").strip()
+
+                    if not title or not link:
+                        continue
+
+                    # Near-duplicate detection
+                    if _is_near_duplicate(title):
+                        logger.info(f"  [Skip] Near-duplicate: {title[:60]}")
+                        continue
+                    seen_titles.append((_title_words(title), title))
+
                     summary_raw = entry.get("summary", "")
                     if not summary_raw and "content" in entry:
                         summary_raw = entry.content[0].value
                     summary = clean_html(summary_raw)
 
-                    if title and link:
-                        if db.insert_opportunity(title, link, summary, source_engine="RSS", ig_tags=[ig], category="News"):
-                            new_count += 1
+                    conn = db_conn.get_connection()
+                    if is_already_scraped(link, ig, conn):
+                        logger.info(f"  [Skip] Already in DB: {link} for IG: {ig}")
+                        continue
+
+                    if db.insert_opportunity(title, link, summary, source_engine="RSS", ig_tags=[ig], category="News"):
+                        new_count += 1
             except Exception as e:
                 logger.error(f"RSS error on {feed_url}: {e}")
     logger.info(f"RSS Scout inserted {new_count} new opportunities.")
@@ -181,6 +172,10 @@ def run_search_agent(db: Database):
                         # Extract summary/snippet from search results
                         summary = result.get('body', result.get(
                             'content', result.get('snippet', '')))
+                        conn = db_conn.get_connection()
+                        if is_already_scraped(link, ig, conn):
+                            logger.info(f"  [Skip] Already in DB: {link} for IG: {ig}")
+                            continue
                         if db.insert_opportunity(title, link, summary=summary, source_engine=source, ig_tags=[ig], category=category.capitalize()):
                             new_count += 1
                 except Exception as e:
@@ -217,7 +212,7 @@ DEVPOST_API = "https://devpost.com/api/hackathons"
 HACKEREARTH_API = "https://www.hackerearth.com/api/events/upcoming/"
 
 
-def normalize_event(name, platform, link, start, end, tags, location="", prize="", cost="", elig=""):
+def normalize_event(name, platform, link, start, end, tags, location="", prize="", cost="", elig="", description=""):
     """Normalize a hackathon event, extracting tag names from dict-style tags."""
     cleaned_tags = []
     if isinstance(tags, list):
@@ -246,7 +241,8 @@ def normalize_event(name, platform, link, start, end, tags, location="", prize="
         "location": str(location).strip() if location else "Online",
         "prizePool": prize if prize else "",
         "cost": str(cost).strip() if cost else "Free",
-        "eligibility": str(elig).strip() if elig else "Students"
+        "eligibility": str(elig).strip() if elig else "Students",
+        "description": str(description).strip() if description else ""
     }
 
 
@@ -272,8 +268,13 @@ async def fetch_devfolio_page(session, semaphore, offset):
                             tags = src.get("themes", [])
                             loc = "Online" if src.get(
                                 "is_online") else "In-Person"
+                            # Extract tagline/desc
+                            desc_val = src.get("tagline") or src.get("desc") or ""
+                            desc_val = clean_html(desc_val).strip()
+                            if len(desc_val) > 250:
+                                desc_val = desc_val[:247] + "..."
                             events.append(normalize_event(
-                                name, "Devfolio", link, start, end, tags, loc, "TBA", "Free", "Students"))
+                                name, "Devfolio", link, start, end, tags, loc, "TBA", "Free", "Students", description=desc_val))
                         except Exception:
                             continue
         except Exception as e:
@@ -326,8 +327,11 @@ async def fetch_unstop_page(session, semaphore, page):
                                 filters, list) else []
                             cost = "Paid" if item.get(
                                 "payment_type") == "paid" else "Free"
+                            desc_val = clean_html(item.get("details", "")).strip()
+                            if len(desc_val) > 250:
+                                desc_val = desc_val[:247] + "..."
                             events.append(normalize_event(
-                                name, "Unstop", link, start, end, tags, "Virtual/Online", "TBA", cost, "Students/College"))
+                                name, "Unstop", link, start, end, tags, "Virtual/Online", "TBA", cost, "Students/College", description=desc_val))
                         except Exception:
                             continue
         except Exception:
@@ -426,8 +430,11 @@ async def fetch_hackerearth_page(session, semaphore, page):
                             end = item.get("end_utc_tz", "TBA")
                             tags = item.get("tags", [])
                             loc = item.get("location", "Online")
+                            desc_val = clean_html(item.get("description", "")).strip()
+                            if len(desc_val) > 250:
+                                desc_val = desc_val[:247] + "..."
                             events.append(normalize_event(
-                                name, "HackerEarth", link, start, end, tags, loc, "TBA", "Free", "Open"))
+                                name, "HackerEarth", link, start, end, tags, loc, "TBA", "Free", "Open", description=desc_val))
                         except Exception:
                             continue
         except Exception:
@@ -603,10 +610,18 @@ async def run_hackathon_apis(db: Database):
             f"Eligibility: {ev['eligibility']}\n"
             f"Tags: {', '.join(ev['tags'])}"
         )
+        desc = ev.get("description", "").strip()
+        if desc:
+            summary += f"\nDescription: {desc}"
         ig_tags = map_hackathon_tags(ev['tags'])
 
         # Only insert if there is at least one mapped IG
         if ig_tags:
+            conn = db_conn.get_connection()
+            primary_ig = ig_tags[0] if ig_tags else "Unknown"
+            if is_already_scraped(ev['registrationLink'], primary_ig, conn):
+                logger.info(f"  [Skip] Already in DB: {ev['registrationLink']} for IG: {primary_ig}")
+                continue
             score = _compute_tag_confidence_score(ig_tags, ev['tags'])
             if db.insert_opportunity(ev['eventName'], ev['registrationLink'], summary, source_engine=ev['platform'], ig_tags=ig_tags, category="Hackathons", is_processed=True, quality_score=score):
                 new_count += 1

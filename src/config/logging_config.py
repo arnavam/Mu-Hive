@@ -4,6 +4,11 @@ import os
 import sys
 import time
 
+from src.config.console import configure_stdio
+
+# Ensure emoji/box-drawing output never crashes on Windows cp1252 consoles.
+configure_stdio()
+
 _start_time = time.time()
 _configured = False
 

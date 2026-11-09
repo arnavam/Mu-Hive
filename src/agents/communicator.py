@@ -6,6 +6,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.columns import Columns
 from src.agents.planner import plan_digests
+from src.agents.trend_detector import detect_trends
 from src.config.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,6 @@ console = Console()
 CATEGORY_ICONS = {
     "News": "📰",
     "Hackathons": "💻",
-    "Internships": "🎓",
-    "Events": "📅",
-    "Workshops": "🛠️",
 }
 
 # --- Emoji icons for each Interest Group ---
@@ -95,25 +93,69 @@ def format_hackathon_details(opp: dict) -> str:
     details = f"[bold]{title}[/bold]\n"
     details += f"[blue][link={link}]{display_url}[/link][/blue]\n"
     
-    # Parse structured fields from summary
-    fields = parse_hackathon_summary(summary)
+    # Parse structured fields from summary or use the provided metadata
+    fields = opp.get('structured_metadata') or parse_hackathon_summary(summary)
     
     if fields:
         if fields.get("Platform"):
             details += f"[dim]🏢 Platform:[/dim] {fields['Platform']}\n"
-        if fields.get("Start"):
-            start = fields.get("Start", "TBA")
-            end = fields.get("End", "")
-            if end and end != start:
+        if fields.get("Start") or fields.get("End") or fields.get("Deadline"):
+            start = fields.get("Start", "")
+            end = fields.get("End") or fields.get("Deadline", "")
+            if start and end and start != end:
                 details += f"[dim]📅 Dates:[/dim] {start} → {end}\n"
-            else:
+            elif start:
                 details += f"[dim]📅 Start:[/dim] {start}\n"
+            elif end:
+                details += f"[dim]📅 Deadline:[/dim] {end}\n"
         if fields.get("Location"):
             details += f"[dim]📍 Location:[/dim] {fields['Location']}\n"
         if fields.get("Prize Pool") and fields["Prize Pool"] not in ("", "TBA"):
             details += f"[dim]🏆 Prize:[/dim] {fields['Prize Pool']}\n"
         if fields.get("Cost"):
             details += f"[dim]💰 Cost:[/dim] {fields['Cost']}\n"
+        if fields.get("Eligibility"):
+            details += f"[dim]🎯 Eligible:[/dim] {fields['Eligibility']}\n"
+        if fields.get("Tags"):
+            details += f"[dim]🏷️  Tags:[/dim] {fields['Tags']}"
+    else:
+        # Fallback: display raw summary truncated
+        if summary:
+            clean = strip_html(summary)
+            if len(clean) > 200:
+                clean = clean[:197].rsplit(' ', 1)[0] + "..."
+            details += f"[dim]{clean}[/dim]"
+    
+    return details
+
+
+def format_internship_details(opp: dict) -> str:
+    """Format an internship with available metadata."""
+    title = strip_html(opp.get('title', 'No Title'))
+    link = opp.get('link', '')
+    summary = opp.get('summary', '')
+    
+    display_url = truncate_url(link)
+    details = f"[bold]{title}[/bold]\n"
+    details += f"[blue][link={link}]{display_url}[/link][/blue]\n"
+    
+    # Try to parse structured fields from summary
+    fields = parse_hackathon_summary(summary)
+    
+    if fields:
+        if fields.get("Platform"):
+            details += f"[dim]🏢 Platform:[/dim] {fields['Platform']}\n"
+        if fields.get("Company"):
+            details += f"[dim]🏛️  Company:[/dim] {fields['Company']}\n"
+        if fields.get("Start") or fields.get("Deadline"):
+            date_val = fields.get("Start") or fields.get("Deadline", "TBA")
+            details += f"[dim]📅 Date:[/dim] {date_val}\n"
+        if fields.get("Location"):
+            details += f"[dim]📍 Location:[/dim] {fields['Location']}\n"
+        if fields.get("Duration"):
+            details += f"[dim]⏱️  Duration:[/dim] {fields['Duration']}\n"
+        if fields.get("Stipend"):
+            details += f"[dim]💰 Stipend:[/dim] {fields['Stipend']}\n"
         if fields.get("Eligibility"):
             details += f"[dim]🎯 Eligible:[/dim] {fields['Eligibility']}\n"
         if fields.get("Tags"):
@@ -140,7 +182,8 @@ def format_digest(ig, opportunities_by_cat):
     ))
     
     # Categories that get structured hackathon formatting
-    structured_categories = {"hackathons", "events", "workshops"}
+    structured_categories = {"hackathons"}
+    internship_categories = {"internships"}
     
     for cat_name, opps in opportunities_by_cat.items():
         if not opps: continue
@@ -159,10 +202,14 @@ def format_digest(ig, opportunities_by_cat):
         for opp in opps:
             if cat_name.lower() in structured_categories:
                 details = format_hackathon_details(opp)
+            elif cat_name.lower() in internship_categories:
+                details = format_internship_details(opp)
             else:
                 details = format_news_details(opp)
             
             score_display = f"{opp['score']}/10"
+            if opp.get('trending'):
+                score_display += "\n🔥"
             table.add_row(score_display, details)
             
         console.print(table)
@@ -171,13 +218,37 @@ def format_digest(ig, opportunities_by_cat):
 
 
 def run_communicator():
-    """Curates and displays the top-scored opportunities per Interest Group."""
+    """Curates and displays the top-scored opportunities per Interest Group.
+    Returns a stats dict for phase reporting."""
     logger.info("Initializing Communicator Agent...")
     digests = plan_digests()
 
+    # Post-scoring trend detection: identify items reported by multiple sources
+    digests = detect_trends(digests)
+
+    stats = {
+        "igs_with_content": 0,
+        "igs_configured": 0,
+        "igs_skipped": 0,
+        "total_items_displayed": 0,
+        "by_ig": {},
+        "by_category": {},
+    }
+
+    try:
+        from src.config.interest_groups import registry
+        from src.config.settings import MAX_IGS_PER_RUN
+        from src.config.interest_groups import apply_ig_cap
+        _configured = registry.all_active_names()
+        _kept, _skipped = apply_ig_cap(_configured, MAX_IGS_PER_RUN)
+        stats["igs_configured"] = len(_configured)
+        stats["igs_skipped"] = len(_skipped)
+    except Exception:
+        pass
+
     if not digests:
         logger.warning("No opportunities passed quality threshold (score >= 6). Nothing to display.")
-        return
+        return stats
 
     console.print()
     console.print(Panel.fit(
@@ -192,10 +263,19 @@ def run_communicator():
         total_items = sum(len(cat_list) for cat_list in opportunities_by_cat.values())
         logger.info(f"Displayed {total_items} curated items for IG: {ig}")
 
+        # Track stats
+        stats["igs_with_content"] += 1
+        stats["total_items_displayed"] += total_items
+        stats["by_ig"][ig] = total_items
+        for cat_name, cat_list in opportunities_by_cat.items():
+            stats["by_category"][cat_name] = stats["by_category"].get(cat_name, 0) + len(cat_list)
+
     console.print(Panel.fit(
         "[bold green]✅  Pipeline complete. All digests displayed above.[/bold green]",
         border_style="green",
     ))
+
+    return stats
 
 if __name__ == "__main__":
     setup_logging()

@@ -111,7 +111,11 @@ class DatabaseFacade:
     # ----------------------------------------------------
     def link_exists(self, link, keyword):
         return self.scrapes.link_exists(link, keyword)
-        
+
+    def existing_url_igs(self, pairs):
+        """Batched existence check for (url, ig) pairs."""
+        return self.scrapes.existing_url_igs(pairs)
+
     def insert_event(self, title, link, keyword_used, source_engine, status):
         return self.scrapes.insert_queue(title, link, keyword_used, source_engine, status)
         
@@ -123,19 +127,64 @@ class DatabaseFacade:
             row['link'] = row['url']
         return rows
         
-    def update_event_scrape(self, doc_id, status, scraped_page_title=None, scraped_meta_description=None, scraped_full_text=None, scrape_layer=None, scrape_error=None):
+    def update_event_scrape(self, doc_id, status, scraped_page_title=None, scraped_meta_description=None, scraped_full_text=None, scrape_layer=None, scrape_error=None, retry_count=None, needs_enrichment=None):
         scrape_data = {}
         if scraped_page_title: scrape_data['scraped_page_title'] = scraped_page_title
         if scraped_meta_description: scrape_data['scraped_meta_description'] = scraped_meta_description
         if scraped_full_text: scrape_data['scraped_full_text'] = scraped_full_text
         if scrape_error: scrape_data['scrape_error'] = scrape_error
+        if retry_count is not None: scrape_data['retry_count'] = retry_count
         
-        return self.scrapes.update_scrape(doc_id, status, scrape_layer, scrape_data)
+        return self.scrapes.update_scrape(
+            doc_id, status, scrape_layer, scrape_data,
+            needs_enrichment=needs_enrichment,
+        )
+
+    # ----------------------------------------------------
+    # LLM evaluation cache (one evaluation per article URL)
+    # ----------------------------------------------------
+    def get_cached_evaluations(self, urls):
+        """Return {url: evaluation_dict} for previously evaluated URLs."""
+        urls = [u for u in (urls or []) if u]
+        if not urls:
+            return {}
+        with db_conn.get_cursor(factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT url, evaluation FROM llm_evaluations WHERE url = ANY(%s)",
+                (list(set(urls)),),
+            )
+            return {row["url"]: row["evaluation"] for row in cur.fetchall()}
+
+    def save_cached_evaluation(self, url, title, evaluation, model_name=None):
+        if not url or not evaluation:
+            return False
+        with db_conn.get_cursor() as cur:
+            cur.execute("""
+                INSERT INTO llm_evaluations (url, title, evaluation, model)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    evaluation = EXCLUDED.evaluation,
+                    model = EXCLUDED.model
+            """, (url, title, json.dumps(evaluation), model_name))
+            return True
+
 
     # ----------------------------------------------------
     # New Methods for Scout and Intelligence Agents
     # ----------------------------------------------------
-    def insert_opportunity(self, title, link, summary=None, source_engine=None, ig_tags=None, category=None, is_processed=False, quality_score=None):
+    def insert_opportunity(
+        self,
+        title,
+        link,
+        summary=None,
+        source_engine=None,
+        ig_tags=None,
+        category=None,
+        is_processed=False,
+        quality_score=None,
+        metadata=None,
+    ):
         """Bridge method for scout.py"""
         if self.scrapes.link_exists(link, ig_tags[0] if ig_tags else None):
             return False
@@ -146,6 +195,8 @@ class DatabaseFacade:
             "category": category,
             "quality_score": quality_score
         }
+        if metadata:
+            data.update(metadata)
         status = "processed" if is_processed else "not processed"
         
         # Mapping ig_tags to the 'ig' column (primary IG)
@@ -162,7 +213,9 @@ class DatabaseFacade:
         params = []
         query, params = self._append_orchestrator_time_filter(query, params, column="scraped_at")
         query += """
-            ORDER BY scraped_at DESC
+            ORDER BY
+                CASE WHEN source = 'RSS' THEN 0 ELSE 1 END,
+                scraped_at DESC
             LIMIT %s;
         """
         params.append(limit)
@@ -174,6 +227,7 @@ class DatabaseFacade:
         # Adapt for MongoDB-style access in intelligence.py
         for row in rows:
             row['_id'] = row['id']
+            row['link'] = row['url']
             # Flatten some fields from JSONB for easier access
             json_data = row.get('data') or {}
             row['summary'] = json_data.get('summary')
@@ -184,56 +238,260 @@ class DatabaseFacade:
             
         return rows
 
-    def update_intelligence(self, item_id, score, tags):
+    @staticmethod
+    def _normalize_category(category):
+        normalized = str(category or "").strip().lower()
+        if normalized == "hackathons":
+            return "Hackathons"
+        if normalized == "news":
+            return "News"
+        return "News"
+
+    def update_intelligence(self, item_id, score, tags, generated_summary=None, category=None, raw_score=None, score_breakdown=None, structured_metadata=None):
         """Update item after LLM evaluation."""
         with db_conn.get_cursor() as cur:
             # Fetch current data to preserve other fields
-            cur.execute("SELECT data FROM scraped_data WHERE id = %s", (item_id,))
+            cur.execute("SELECT title, url, source, data FROM scraped_data WHERE id = %s", (item_id,))
             row = cur.fetchone()
-            data = row[0] if row and row[0] else {}
+            if not row:
+                return False
+            title, url, source, data = row[0], row[1], row[2], (row[3] if row[3] else {})
             
             data['quality_score'] = score
             data['validated_tags'] = tags
+            if raw_score is not None:
+                data['raw_quality_score'] = raw_score
+            if score_breakdown is not None:
+                data['score_breakdown'] = score_breakdown
+            
+            # Store LLM-generated summary if available (Bug 7 fix)
+            if generated_summary:
+                data['summary'] = generated_summary
+            
+            # Extract final summary for the events table (use LLM summary or fallback to original scraped summary)
+            final_summary = generated_summary or data.get('summary') or ''
+            
+            normalized_category = self._normalize_category(category or data.get('category'))
+            data['category'] = normalized_category
+
+            # Merge structured metadata from LLM (hackathon details)
+            if structured_metadata:
+                data['structured_metadata'] = structured_metadata
             
             status = 'processed' if score > 0 else 'irrelevant'
             
-            cur.execute("""
-                UPDATE scraped_data 
-                SET status = %s, data = %s, ig = %s
-                WHERE id = %s
-            """, (status, json.dumps(data), tags[0] if tags else 'Unknown', item_id))
+            try:
+                cur.execute("""
+                    UPDATE scraped_data 
+                    SET status = %s, data = %s, ig = %s
+                    WHERE id = %s
+                """, (status, json.dumps(data), tags[0] if tags else 'Unknown', item_id))
+            except Exception as e:
+                # Catch unique violation if the URL and IG combination already exists
+                import psycopg2
+                if isinstance(e, psycopg2.errors.UniqueViolation) or "unique constraint" in str(e).lower():
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Duplicate scraped_data entry found for URL: %s and IG: %s. Merging into existing row and removing duplicate ID %s.",
+                        url, tags[0] if tags else 'Unknown', item_id
+                    )
+                    # Merge: update the existing row with the new score/tags, then delete the duplicate
+                    new_ig = tags[0] if tags else 'Unknown'
+                    cur.execute(
+                        """UPDATE scraped_data
+                           SET status = %s, data = %s
+                           WHERE url = %s AND ig = %s AND id != %s""",
+                        (status, json.dumps(data), url, new_ig, item_id)
+                    )
+                    cur.execute("DELETE FROM scraped_data WHERE id = %s", (item_id,))
+                    return False
+                raise e
+            
+            if status == 'processed' and tags:
+                # Extract optional fields from scraped_data
+                platform_val = data.get('platform') or source or 'RSS'
+                location_val = data.get('location')
+
+                # Extract deadline from structured_metadata (LLM returns 'End' key)
+                deadline_val = None
+                if structured_metadata:
+                    deadline_val = (
+                        structured_metadata.get('End')
+                        or structured_metadata.get('end')
+                        or structured_metadata.get('Deadline')
+                        or structured_metadata.get('deadline')
+                    )
+                # Fallback to JSONB data fields
+                if not deadline_val:
+                    deadline_val = data.get('endDate') or data.get('deadline')
+
+                # Extract location from structured_metadata if not already set
+                if not location_val and structured_metadata:
+                    location_val = (
+                        structured_metadata.get('Location')
+                        or structured_metadata.get('location')
+                        or structured_metadata.get('Mode')
+                        or structured_metadata.get('mode')
+                    )
+
+                # Extract platform from structured_metadata if not already set
+                if structured_metadata and (not platform_val or platform_val == 'RSS'):
+                    platform_val = (
+                        structured_metadata.get('Platform')
+                        or structured_metadata.get('platform')
+                        or platform_val
+                    )
+
+                # Compute days_left / deadline if possible
+                days_left_val = None
+                if 'days_left' in data:
+                    days_left_val = data.get('days_left')
+                else:
+                    # Try to compute from deadline if present (ISO format)
+                    deadline_str = deadline_val or data.get('endDate') or data.get('startDate')
+                    if deadline_str:
+                        try:
+                            from datetime import datetime, timezone
+                            dl_dt = datetime.fromisoformat(deadline_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+                            now = datetime.now(timezone.utc)
+                            delta = (dl_dt - now).days
+                            days_left_val = max(delta, 0)
+                        except Exception:
+                            days_left_val = None
+                # Skip if event already exists (apply_link unique)
+                cur.execute("SELECT id FROM events WHERE apply_link = %s", (url,))
+                existing_event = cur.fetchone()
+                if not existing_event:
+                    try:
+                        self.events.upsert({
+                            'title': title,
+                            'ig': tags[0],
+                            # Full validated memberships for the junction table;
+                            # legacy events.ig keeps tags[0] for compatibility.
+                            'ig_names': list(tags),
+                            'category': normalized_category,
+                            'summary': final_summary,
+                            'apply_link': url,
+                            'validity_score': score,
+                            'platform': platform_val,
+                            'location': location_val,
+                            'days_left': days_left_val,
+                            'deadline': deadline_val,
+                        })
+                    except Exception as evt_err:
+                        import logging
+                        logging.getLogger(__name__).error(
+                            "Events upsert failed for %s: %s", url, evt_err
+                        )
+                else:
+                    # Event row already canonical: refresh junction memberships
+                    # so re-classification drops stale IGs (legacy row untouched).
+                    try:
+                        self.events.sync_interest_groups(cur, existing_event[0], tags)
+                    except Exception as evt_err:
+                        import logging
+                        logging.getLogger(__name__).error(
+                            "Event IG sync failed for %s: %s", url, evt_err
+                        )
             
             return cur.rowcount > 0
 
-    def get_top_opportunities_by_ig_and_category(self, ig, category, limit=5):
-        """Fetches top-scored opportunities for a specific IG and Category."""
-        query = """
-            SELECT * FROM scraped_data
-            WHERE status = 'processed'
-            AND ig = %s
-            AND (data->>'category' = %s OR data->>'category' IS NULL)
+    def get_top_opportunities_by_ig_and_category(self, ig, category, limit=5, include_sent=True,
+                                                     pending_ig=None, pending_channel=None):
+        """Fetches top-scored opportunities for a specific IG and Category from the events table.
+        Matches the legacy primary IG (events.ig) and secondary memberships
+        in event_interest_groups. Uses DISTINCT ON to prevent duplicate events
+        when scraped_data has multiple rows for the same URL or an event has
+        several IG memberships.
+
+        When pending_ig/pending_channel are given (notifier path), an event is
+        eligible unless that specific (event, IG, channel) delivery is logged.
+        In that mode the legacy global sent filter is intentionally NOT applied:
+        one IG's delivery must not suppress another IG's. Callers that want the
+        legacy global behavior omit the pending arguments.
         """
-        params = [ig, category]
-        query, params = self._append_orchestrator_time_filter(query, params, column="scraped_at")
-        query += """
-            ORDER BY (data->>'quality_score')::int DESC, scraped_at DESC
+        inner_query = """
+            SELECT DISTINCT ON (e.apply_link)
+                e.id, e.title, e.apply_link, e.ig, e.category, e.summary,
+                e.validity_score, e.platform, e.location, e.deadline,
+                e.days_left, e.zulip_sent, e.created_at,
+                s.data->'structured_metadata' as structured_metadata,
+                s.source as source_engine
+            FROM events e
+            LEFT JOIN scraped_data s ON e.apply_link = s.url AND e.ig = s.ig
+            LEFT JOIN event_interest_groups jig
+                ON jig.event_id = e.id AND jig.ig_name = %s
+            WHERE (e.ig = %s OR jig.ig_name IS NOT NULL)
+            AND e.category = %s
+        """
+        params = [ig, ig, category]
+
+        pending_mode = pending_ig is not None and pending_channel is not None
+        if pending_mode:
+            inner_query += """
+            AND NOT EXISTS (
+                SELECT 1 FROM event_deliveries d
+                WHERE d.event_id = e.id
+                  AND d.ig_name = %s
+                  AND d.channel = %s
+            )
+            """
+            params.extend([pending_ig, pending_channel])
+        elif not include_sent:
+            inner_query += " AND (e.zulip_sent = FALSE OR e.zulip_sent IS NULL)"
+            
+        inner_query, params = self._append_orchestrator_time_filter(inner_query, params, column="e.created_at")
+        inner_query += """
+            ORDER BY e.apply_link, e.validity_score DESC
+        """
+        # Wrap in subquery so we can ORDER BY score after DISTINCT ON
+        query = f"""
+            SELECT * FROM ({inner_query}) AS unique_events
+            ORDER BY
+                validity_score DESC,
+                created_at DESC
             LIMIT %s;
         """
         params.append(limit)
 
         with db_conn.get_cursor(factory=RealDictCursor) as cur:
-            # Note: We filter by 'processed' and sort by quality_score stored in JSONB
             cur.execute(query, tuple(params))
             rows = cur.fetchall()
-            
-        # Adapt for agents
+
+        # Adapt for agents (backward compatibility with scraped_data structure)
         for row in rows:
             row['_id'] = row['id']
-            json_data = row.get('data') or {}
-            row['summary'] = json_data.get('summary')
-            row['link'] = row['url']
+            row['url'] = row['apply_link']
+            row['data'] = {
+                'location': row['location'] or 'Online',
+                'platform': row['platform'] or 'RSS',
+                'days_left': row['days_left'],
+                'endDate': row['deadline'] or 'TBA',
+                'summary': row['summary']
+            }
+            row['quality_score'] = row['validity_score'] or 0
+            row['summary'] = row['summary'] or 'No summary available.'
+            row['link'] = row['apply_link']
+            row['source_engine'] = row.get('source_engine') or row['platform'] or ''
+            row['category'] = row['category'] or 'Unknown'
+            row['structured_metadata'] = row.get('structured_metadata') or {}
         return rows
         
+    def update_event_summary_by_link(self, link: str, summary: str):
+        """Update the events table summary for a given apply_link after Groq generates it."""
+        if not link or not summary:
+            return False
+        with db_conn.get_cursor() as cur:
+            cur.execute(
+                """
+                UPDATE events
+                SET summary = %s, updated_at = %s
+                WHERE apply_link = %s AND (summary IS NULL OR summary = '');
+                """,
+                (summary, datetime.now(timezone.utc), link),
+            )
+            return cur.rowcount > 0
+
     def close(self):
         # Postgres connection is persistent, ignore.
         pass
@@ -261,5 +519,20 @@ def save_events(grouped: dict):
                 modified += 1
     return inserted, modified
 
-# Singleton instance for the application
-db = DatabaseFacade()
+class _LazyDatabaseFacade:
+    """Import-safe proxy that opens Postgres only when first used."""
+
+    def __init__(self):
+        self._instance = None
+
+    def _get_instance(self):
+        if self._instance is None:
+            self._instance = DatabaseFacade()
+        return self._instance
+
+    def __getattr__(self, name):
+        return getattr(self._get_instance(), name)
+
+
+# Singleton-compatible proxy for existing scripts.
+db = _LazyDatabaseFacade()

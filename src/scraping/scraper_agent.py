@@ -9,6 +9,8 @@ from readability import Document
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 from src.db.postgres_database import DatabaseFacade
+from src.utils.ig_normalizer import normalize_ig
+from src.config.sources import group_feeds_by_url
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,6 +31,49 @@ PW_WAIT_MS   = 4000    # ms to wait after page load for JS
 MAX_IMAGES   = 5       # max images extracted (URLs only)
 USER_AGENT   = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+feedparser.USER_AGENT = USER_AGENT
+
+# Some publishers reject browser user agents on their feed endpoints while
+# allowing feed readers (e.g. kdnuggets.com). Retry once with a reader UA.
+FEED_READER_UA = "feedparser/6.0 (+https://github.com/kurtmckee/feedparser)"
+RSS_BLOCKED_STATUS = {401, 403, 406, 429}
+
+
+async def fetch_feed_bytes(client, url: str, attempts: int = 3) -> bytes:
+    """Fetch a feed with a reader-UA fallback and bounded retries.
+
+    Transient transport errors are common when dozens of feeds are fetched
+    concurrently, so retry with exponential backoff. Permanent 4xx responses
+    (other than 408/425/429) fail immediately.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            response = await client.get(url)
+            if response.status_code in RSS_BLOCKED_STATUS:
+                logger.info(
+                    f"[RSS] {url} -> HTTP {response.status_code}; "
+                    "retrying with feed-reader user agent"
+                )
+                response = await client.get(
+                    url, headers={"User-Agent": FEED_READER_UA}
+                )
+            response.raise_for_status()
+            return response.content
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status and 400 <= status < 500 and status not in {408, 425, 429}:
+                raise
+            if attempt < attempts - 1:
+                delay = 2 ** attempt
+                logger.info(
+                    f"[RSS] {url} -> {str(exc) or type(exc).__name__}; "
+                    f"retry {attempt + 1}/{attempts - 1} in {delay}s"
+                )
+                await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
  
  
 # ── Text extraction ───────────────────────────────────────────────────────────
@@ -116,17 +161,26 @@ async def l2_playwright(url: str, browser) -> tuple | None:
         logger.info(f"    [L2:{url[:50]}] {e}"); return None
  
  
+from src.scraping.firecrawl_tool import firecrawl_extract
+
 # ── Core scraping logic with structured output ────────────────────────────────────────────────────
 async def scrape_url(url: str, browser=None) -> dict | None:
     """
     Scrape a URL, returning full text.
     Returns dict with keys: text, page_title, meta_description, layer
-    or None if both layers fail.
+    or None if all layers fail.
     """
     logger.info(f"  [L1:{url[:50]}] trying...")
     result = await l1_httpx(url)
     label = "L1"
     
+    if not result:
+        logger.info(f"  [Firecrawl:{url[:50]}] trying...")
+        fc_text, fc_title, fc_desc, fc_imgs = await firecrawl_extract(url)
+        if fc_text and len(fc_text.split()) >= MIN_WORDS:
+            result = (fc_text, fc_title, fc_desc, fc_imgs[:MAX_IMAGES])
+            label = "Firecrawl"
+            
     if not result:
         logger.info(f"  [L2:{url[:50]}] trying...")
         if browser:
@@ -143,7 +197,7 @@ async def scrape_url(url: str, browser=None) -> dict | None:
         logger.info(f"  [{label}:{url[:50]}] ✓ {len(text.split())} words")
         return {"text": text, "page_title": title, "meta_description": meta, "layer": label}
 
-    logger.info(f"  [FAIL:{url[:50]}] both layers failed")
+    logger.info(f"  [FAIL:{url[:50]}] all layers failed")
     return None
  
  
@@ -154,10 +208,18 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
     db      = DatabaseFacade()
     pending = db.find_pending_scrape(limit=limit)
 
+    stats = {
+        "pending": len(pending) if pending else 0,
+        "scraped_ok": 0,
+        "scrape_failed": 0,
+        "spam_filtered": 0,
+        "scrape_layers": {"L1": 0, "Firecrawl": 0, "L2": 0},
+    }
+
     if not pending:
         logger.info("nothing to scrape.")
         db.close()
-        return
+        return stats
     
     logger.info(f"{len(pending)} doc(s) queued.")
     semaphore = asyncio.Semaphore(5)
@@ -167,22 +229,43 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
             doc_id, link = doc["_id"], doc.get("link")
             logger.info(f"\n── {link}")
 
+            # Track retry count from JSONB data field
+            current_data = doc.get("data") or {}
+            retry_count = current_data.get("retry_count", 0)
+
             if not (isinstance(link, str) and link.startswith(("http://", "https://"))):
+                current_data["retry_count"] = retry_count + 1
                 db.update_event_scrape(doc_id, status="scrape_failed",
-                                       scrape_error="invalid URL")
+                                       scrape_error="invalid URL",
+                                       retry_count=current_data["retry_count"])
+                stats["scrape_failed"] += 1
                 return
                 
             SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
             if any(spam in link for spam in SPAM_DOMAINS):
                 logger.info("  [Skip] Spam domain filtered.")
                 db.update_event_scrape(doc_id, status="scrape_failed", scrape_error="spam domain")
+                stats["spam_filtered"] += 1
                 return
 
             result = await scrape_url(link, browser)
 
             if not result:
-                db.update_event_scrape(doc_id, status="scrape_failed",
-                                       scrape_error="all layers failed")
+                current_data["retry_count"] = retry_count + 1
+                # Summary-only rows must stay available to intelligence even
+                # when enrichment fails again; only rows with no summary are
+                # parked as scrape_failed.
+                has_summary = bool(current_data.get("summary") or current_data.get("scraped_full_text"))
+                new_retry_count = current_data["retry_count"]
+                keep_for_intelligence = has_summary
+                db.update_event_scrape(
+                    doc_id,
+                    status="scraped" if keep_for_intelligence else "scrape_failed",
+                    scrape_error="enrichment failed; summary retained" if keep_for_intelligence else "all layers failed",
+                    retry_count=new_retry_count,
+                    needs_enrichment=keep_for_intelligence and new_retry_count < 3,
+                )
+                stats["scrape_failed"] += 1
                 return
 
             ok = db.update_event_scrape(
@@ -192,7 +275,12 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
                 scraped_meta_description=result["meta_description"],
                 scraped_full_text=result["text"],
                 scrape_layer=result["layer"],
+                needs_enrichment=False,
             )
+            stats["scraped_ok"] += 1
+            layer = result["layer"]
+            if layer in stats["scrape_layers"]:
+                stats["scrape_layers"][layer] += 1
             logger.info(f"  [{'saved' if ok else 'warn: no match'}:{link[:40]}] "
                         f"layer={result['layer']} words={len(result['text'].split())}")
 
@@ -203,46 +291,129 @@ async def run_scraper_agent(limit: int = SCRAPE_LIMIT):
 
     db.close()
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] scraper done.")
+    return stats
 
 
  # ── RSS Feed scraper ──────────────────────────────────────────────────────────
 async def run_rss_agent():
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper starting...")
     db        = DatabaseFacade()
-    seen_urls = set()
+    seen_url_igs = set()          # (link, ig) pairs handled in this run
+    seen_titles: list[tuple] = []  # (ig, word_set, title_str) for duplicate detection
+    seen_title_index: dict[str, dict[str, list[int]]] = {}  # ig -> word -> row indices
     semaphore = asyncio.Semaphore(5)
+    feed_semaphore = asyncio.Semaphore(
+        max(1, int(os.getenv("RSS_FEED_CONCURRENCY", "10")))
+    )
+
+    stats = {
+        "feeds_processed": 0,
+        "entries_found": 0,
+        "items_inserted": 0,
+        "summary_only_inserted": 0,
+        "duplicates_skipped": 0,
+        "near_duplicates_skipped": 0,
+        "scrape_failures": 0,
+        "scrape_layers": {"L1": 0, "Firecrawl": 0, "L2": 0},
+    }
 
     SPAM_DOMAINS = ["bloguerosa.com", "qodsblog.com", "blogdeazar.com", "blazingblog.com"]
 
-    async def process_rss_feed(feed_url, browser, ig_category):
-        try:
-            logger.info(f"Fetching RSS: {feed_url} [{ig_category}]")
-            # feedparser fetches natively — works for all feeds without httpx
-            feed = feedparser.parse(feed_url)
+    def _title_words(title: str) -> set:
+        """Extract lowercase word set from a title for similarity comparison."""
+        return set(title.lower().split()) - {"the", "a", "an", "is", "in", "on", "of", "and", "to", "for", "with", "at", "by"}
 
-            status = feed.get("status", 0)
-            if status >= 400:
-                logger.info(f"[RSS Error] {feed_url} -> HTTP {status}")
-                return
+    def _is_near_duplicate(title: str, ig: str) -> bool:
+        """Check if a title is >80% similar (Jaccard) to another seen title.
+
+        Scoped per interest group: the same story legitimately belongs to
+        several IGs and must not be dropped for the second one.
+
+        Candidate rows come from a per-IG inverted index (word -> row), so
+        only titles sharing at least one word are compared instead of every
+        previously seen title (previously O(n^2) per IG).
+        """
+        words = _title_words(title)
+        if len(words) < 3:
+            return False
+        index = seen_title_index.get(ig) or {}
+        candidate_rows = set()
+        for word in words:
+            candidate_rows.update(index.get(word, ()))
+        for row_idx in candidate_rows:
+            seen_ig, seen_words, _ = seen_titles[row_idx]
+            if seen_ig != ig or not seen_words:
+                continue
+            intersection = words & seen_words
+            union = words | seen_words
+            if len(union) > 0 and len(intersection) / len(union) > 0.8:
+                return True
+        return False
+
+    def _remember_title(title: str, ig: str) -> None:
+        words = _title_words(title)
+        row_idx = len(seen_titles)
+        seen_titles.append((ig, words, title))
+        index = seen_title_index.setdefault(ig, {})
+        for word in words:
+            index.setdefault(word, []).append(row_idx)
+
+    async def process_rss_feed(feed_url, browser, ig_categories):
+        """Fetch one feed URL once; attribute entries to each listed IG.
+
+        Accepts a single IG name or a list of IG names (shared feeds).
+        Entry-level deduplication semantics are unchanged.
+        """
+        if isinstance(ig_categories, str):
+            ig_categories = [ig_categories]
+        try:
+            logger.info(f"Fetching RSS: {feed_url} [{', '.join(ig_categories)}]")
+            async with feed_semaphore:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0,
+                                             headers={"User-Agent": USER_AGENT}) as client:
+                    feed_data = await fetch_feed_bytes(client, feed_url)
+
+            feed = feedparser.parse(feed_data)
+            stats["feeds_processed"] += 1
 
             if not feed.entries:
                 logger.info(f"[RSS Skip] {feed_url} -> 0 entries returned")
                 return
 
+            stats["entries_found"] += len(feed.entries[:5])
             logger.info(f"[RSS] {feed_url} -> {len(feed.entries)} entries, processing top 5")
 
-            for entry in feed.entries[:5]:
-                async with semaphore:
+            # Resolve in-memory duplicates first, then check DB existence in a
+            # single batched query per feed instead of one query per entry.
+            candidates = []
+            for ig_category in ig_categories:
+                for entry in feed.entries[:5]:
                     link  = entry.get("link")
                     title = entry.get("title", "No Title")
 
                     if not link:
                         continue
-                    if link in seen_urls:
+                    if (link, ig_category) in seen_url_igs:
+                        stats["duplicates_skipped"] += 1
                         continue
-                    seen_urls.add(link)
-                    if db.link_exists(link, ig_category):
+                    seen_url_igs.add((link, ig_category))
+
+                    # Near-duplicate detection across feeds, per IG
+                    if _is_near_duplicate(title, ig_category):
+                        logger.info(f"  [Skip] Near-duplicate title: {title[:60]}")
+                        stats["near_duplicates_skipped"] += 1
+                        continue
+                    _remember_title(title, ig_category)
+                    candidates.append((ig_category, entry, link, title))
+
+            existing = db.existing_url_igs(
+                [(link, ig_category) for ig_category, _entry, link, _title in candidates]
+            )
+            for ig_category, entry, link, title in candidates:
+                async with semaphore:
+                    if (link, ig_category) in existing:
                         logger.info(f"  [Skip] Already in DB: {link[:60]}")
+                        stats["duplicates_skipped"] += 1
                         continue
 
                     logger.info(f"\n── RSS Item: {title} | {link}")
@@ -251,39 +422,137 @@ async def run_rss_agent():
                         logger.info("  [Skip] Spam domain filtered.")
                         continue
 
+                    # Clean the RSS summary once; it is the fallback payload
+                    # when full-text extraction fails.
+                    rss_summary = entry.get("summary", "") or entry.get("description", "")
+                    if rss_summary:
+                        from bs4 import BeautifulSoup as _BS
+                        rss_summary = _BS(rss_summary, "html.parser").get_text(
+                            separator=' ', strip=True
+                        )
+
                     result = await scrape_url(link, browser)
+
+                    # Extract published timestamp for recency bonus in intelligence agent
+                    import calendar
+                    published_at = None
+                    pub_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+                    if pub_parsed:
+                        try:
+                            published_at = calendar.timegm(pub_parsed)
+                        except Exception:
+                            pass
+
                     if not result:
-                        logger.info(f"  [Fail] RSS item scrape failed: {link[:50]}")
+                        # Persist summary-only items instead of dropping them.
+                        # Intelligence decides relevance from the summary, and
+                        # needs_enrichment lets a later run retry full text.
+                        if not rss_summary:
+                            logger.info(f"  [Fail] RSS item scrape failed (no summary): {link[:50]}")
+                            stats["scrape_failures"] += 1
+                            continue
+                        item_data = {
+                            "summary": rss_summary,
+                            "category": "News",
+                            "ig_tags": [ig_category],
+                            "scraped_page_title": title,
+                            "scraped_meta_description": rss_summary[:300],
+                            "needs_enrichment": True,
+                            "scrape_error": "all layers failed; summary-only",
+                        }
+                        if published_at is not None:
+                            item_data["published_at"] = published_at
+                        doc_id = db.scrapes.insert_queue(
+                            title, link, ig_category, "RSS", "scraped",
+                            data=item_data, needs_enrichment=True,
+                        )
+                        if doc_id:
+                            stats["items_inserted"] += 1
+                            stats["summary_only_inserted"] = (
+                                stats.get("summary_only_inserted", 0) + 1
+                            )
+                            logger.info(
+                                f"  [saved:{link[:40]}] (RSS summary-only) "
+                                f"chars={len(rss_summary)} needs_enrichment=true"
+                            )
+                        else:
+                            stats["scrape_failures"] += 1
                         continue
 
-                    doc_id = db.insert_event(title, link, ig_category, "RSS", "scraped")
+                    # Track scrape layer
+                    layer = result.get("layer", "L1")
+                    if layer in stats["scrape_layers"]:
+                        stats["scrape_layers"][layer] += 1
+
+                    item_data = {
+                        "summary": rss_summary,
+                        "category": "News",
+                        "ig_tags": [ig_category],
+                        "scraped_full_text": result["text"],
+                        "scraped_page_title": result["page_title"],
+                        "scraped_meta_description": result["meta_description"],
+                    }
+                    if published_at is not None:
+                        item_data["published_at"] = published_at
+
+                    doc_id = db.scrapes.insert_queue(
+                        title, link, ig_category, "RSS", "scraped", data=item_data
+                    )
                     if doc_id:
-                        ok = db.update_event_scrape(
-                            doc_id,
-                            status="scraped",
-                            scraped_page_title=result["page_title"],
-                            scraped_meta_description=result["meta_description"],
-                            scraped_full_text=result["text"],
-                            scrape_layer=result["layer"],
-                        )
-                        logger.info(f"  [{'saved' if ok else 'warn: no match'}:{link[:40]}] "
+                        stats["items_inserted"] += 1
+                        logger.info(f"  [saved:{link[:40]}] "
                                     f"(RSS) layer={result['layer']} words={len(result['text'].split())}")
         except Exception as e:
-            logger.info(f"[RSS Error] {feed_url} -> {e}")
+            logger.info(f"[RSS Error] {feed_url} -> {str(e) or type(e).__name__}")
 
     from src.config.sources import ALL_RSS_FEEDS
+
+    # Normalize IG categories from sources.py as safety net
+    normalized_feeds = {}
+    for ig_key, feeds in ALL_RSS_FEEDS.items():
+        canonical = normalize_ig(ig_key) or ig_key
+        normalized_feeds.setdefault(canonical, [])
+        for feed_url in feeds or []:
+            if feed_url not in normalized_feeds[canonical]:
+                normalized_feeds[canonical].append(feed_url)
+
+    # Discovery readiness vs the registry (reported, never invented).
+    try:
+        from src.config.interest_groups import registry
+        _active = registry.all_active_names()
+        _with_feeds = [ig for ig in _active if normalized_feeds.get(ig)]
+        _without_feeds = [ig for ig in _active if not normalized_feeds.get(ig)]
+        stats["igs_configured"] = len(_active)
+        stats["igs_with_feeds"] = len(_with_feeds)
+        stats["igs_without_feeds"] = len(_without_feeds)
+        logger.info(
+            "Discovery readiness: %d/%d active IGs have RSS feeds.",
+            len(_with_feeds), len(_active),
+        )
+        if _without_feeds:
+            logger.info(
+                "IGs without RSS feeds (not discovery-ready via RSS): %s",
+                ", ".join(_without_feeds),
+            )
+    except Exception as e:
+        logger.warning(f"Could not compute discovery readiness: {e}")
+
+    # Fetch each unique feed URL once; attribute its entries to every IG
+    # that lists it (shared feeds are not re-fetched).
+    feed_igs = group_feeds_by_url(normalized_feeds)
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         logger.info("\n--- Scraping RSS Feeds ---")
         tasks = []
-        for ig_category, feeds in ALL_RSS_FEEDS.items():
-            for feed_url in feeds:
-                tasks.append(process_rss_feed(feed_url, browser, ig_category))
+        for feed_url, ig_categories in feed_igs.items():
+            tasks.append(process_rss_feed(feed_url, browser, ig_categories))
         await asyncio.gather(*tasks)
         await browser.close()
 
     db.close()
     logger.info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] RSS scraper done.")
+    return stats
 
 
 if __name__ == "__main__":
